@@ -2,5 +2,9 @@
   "rewrites": [
     { "source": "/webhook/:tipo", "destination": "/api/webhook/:tipo" },
     { "source": "/metrics", "destination": "/api/metrics" }
-  ]
+  ],
+  "functions": {
+    "api/ghl-sync.ts": { "maxDuration": 60 },
+    "api/ghl-debug.ts": { "maxDuration": 30 }
+  }
 }
