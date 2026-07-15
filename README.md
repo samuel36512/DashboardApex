@@ -211,15 +211,37 @@ Para cada evento (Lead, Registro, FTD, Venta):
 - GHL reintenta webhooks que fallan; gracias al upsert por
   `(contacto_id, tipo)` un reintento no duplica el conteo en `/metrics`.
 
-## 7. Conectar el frontend
+## 7. El panel visual (dashboard) y cómo publicarlo en Vercel
 
-En tu dashboard, reemplazá los datos de ejemplo por:
+En `frontend/index.html` hay un panel ya armado y listo para usar: muestra
+los totales del equipo, un gráfico de ventas por agente contra la meta de
+USD 2,400, y una tabla con el detalle completo. No necesita ningún paso de
+build ni de instalación — es un solo archivo.
 
-```js
-fetch("https://TU-WORKER.workers.dev/metrics")
-  .then((res) => res.json())
-  .then((data) => {
-    // data.agentes -> array con leads, registros, ftds, ventasUSD, conversion
-    // data.metaVentasUSD -> 2400
-  });
-```
+La primera vez que se abre te pide la URL de tu backend (la que imprimió
+`npm run deploy` en el paso 4) y la guarda en el navegador — no hay que
+tocar código para conectarlo.
+
+### Publicarlo en Vercel (sin usar la terminal)
+
+1. Entrá a [vercel.com](https://vercel.com) con tu cuenta.
+2. Click en **Add New… > Project**.
+3. Elegí la opción de importar este repositorio de GitHub
+   (`samuel36512/DashboardApex`) y cuando te pregunte el **Root Directory**
+   (directorio raíz), seleccioná la carpeta `frontend`.
+4. Dejá el resto de las opciones por defecto (no hace falta ningún comando
+   de build) y click en **Deploy**.
+5. Vercel te va a dar una URL pública (algo como
+   `https://dashboardapex.vercel.app`). Abrila.
+6. Vas a ver la pantalla "Conectá tu backend": pegá ahí la URL de tu Worker
+   de Cloudflare (la del paso 4 de este mismo documento, algo como
+   `https://dashboardapex-backend.tu-usuario.workers.dev`) y click en
+   **Guardar y conectar**.
+
+Listo — el panel va a mostrar los datos reales y se actualiza solo cada
+minuto (también tiene un botón "Actualizar" para forzarlo). Cada vez que
+alguien abra esa URL en su navegador, va a quedar conectado automáticamente
+(la conexión se guarda en ese navegador).
+
+Si más adelante cambiás de Worker o te equivocaste al pegar la URL, click
+en el ícono de engranaje (⚙) arriba a la derecha del panel para cambiarla.
