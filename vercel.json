@@ -1,0 +1,6 @@
+{
+  "rewrites": [
+    { "source": "/webhook/:tipo", "destination": "/api/webhook/:tipo" },
+    { "source": "/metrics", "destination": "/api/metrics" }
+  ]
+}

@@ -1,17 +1,19 @@
 {
-  "name": "dashboardapex-backend",
+  "name": "dashboardapex",
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "db:init": "wrangler d1 execute dashboardapex --local --file=./schema.sql",
-    "db:init:remote": "wrangler d1 execute dashboardapex --remote --file=./schema.sql",
+    "dev": "vercel dev",
+    "deploy": "vercel deploy --prod",
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4"
+  },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20241004.0",
+    "@types/node": "^20.14.0",
+    "@vercel/node": "^3.2.0",
     "typescript": "^5.6.3",
-    "wrangler": "^3.90.0"
+    "vercel": "^37.0.0"
   }
 }

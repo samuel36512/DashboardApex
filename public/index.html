@@ -109,18 +109,6 @@
   }
   .btn:hover { border-color: var(--text-muted); }
   .btn:disabled { opacity: 0.5; cursor: default; }
-  .icon-btn {
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--text-secondary);
-    border-radius: 8px;
-    width: 32px;
-    height: 32px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 15px;
-  }
 
   .card {
     background: var(--surface-1);
@@ -271,44 +259,11 @@
   .state .big { font-size: 15px; color: var(--text-primary); margin-bottom: 6px; }
   .state .small { font-size: 13px; }
 
-  /* ---- Setup panel ---- */
-  .setup {
-    max-width: 560px;
-    margin: 60px auto;
-  }
-  .setup h2 { font-size: 17px; margin: 0 0 6px; }
-  .setup p { font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
-  .setup input {
-    width: 100%;
-    font: inherit;
-    font-size: 13px;
-    padding: 10px 12px;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    background: var(--page);
-    color: var(--text-primary);
-    margin: 10px 0;
-  }
-  .setup .error {
-    color: #d03b3b;
-    font-size: 12px;
-    min-height: 16px;
-  }
-  .setup-actions { display: flex; gap: 8px; margin-top: 4px; }
-
   footer {
     margin-top: 30px;
     text-align: center;
     font-size: 11px;
     color: var(--text-muted);
-  }
-  footer button {
-    background: none;
-    border: none;
-    color: var(--text-muted);
-    text-decoration: underline;
-    font-size: 11px;
-    padding: 0;
   }
 </style>
 </head>
@@ -321,24 +276,12 @@
 (function () {
   "use strict";
 
-  var STORAGE_KEY = "ghl_dashboard_api_url";
   var REFRESH_MS = 60000;
   var app = document.getElementById("app");
   var refreshTimer = null;
 
   var currency = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
   var currencyPrecise = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
-
-  function getApiUrl() {
-    var v = localStorage.getItem(STORAGE_KEY);
-    return v ? v.replace(/\/+$/, "") : null;
-  }
-  function setApiUrl(url) {
-    localStorage.setItem(STORAGE_KEY, url.replace(/\/+$/, ""));
-  }
-  function clearApiUrl() {
-    localStorage.removeItem(STORAGE_KEY);
-  }
 
   function el(tag, attrs, children) {
     var node = document.createElement(tag);
@@ -353,38 +296,6 @@
     return node;
   }
 
-  // ---------- Setup screen (no API URL configured yet) ----------
-  function renderSetup(prefill, errorMsg) {
-    app.innerHTML = "";
-    var panel = el("div", { class: "card setup" }, [
-      el("h2", { text: "Conectá tu backend" }),
-      el("p", { html: "Pegá acá la dirección (URL) de tu Worker de Cloudflare. Te la mostró la terminal después de publicarlo, y tiene esta forma:<br><code>https://dashboardapex-backend.TU-USUARIO.workers.dev</code>" }),
-    ]);
-    var input = el("input", { type: "text", placeholder: "https://dashboardapex-backend.tu-usuario.workers.dev", value: prefill || "" });
-    var error = el("div", { class: "error", text: errorMsg || "" });
-    var actions = el("div", { class: "setup-actions" });
-    var saveBtn = el("button", { class: "btn", text: "Guardar y conectar" });
-    saveBtn.addEventListener("click", function () {
-      var val = input.value.trim();
-      if (!/^https?:\/\/.+/i.test(val)) {
-        error.textContent = "Ingresá una URL válida, que empiece con https://";
-        return;
-      }
-      setApiUrl(val);
-      boot();
-    });
-    input.addEventListener("keydown", function (e) {
-      if (e.key === "Enter") saveBtn.click();
-    });
-    actions.appendChild(saveBtn);
-    panel.appendChild(input);
-    panel.appendChild(error);
-    panel.appendChild(actions);
-    app.appendChild(panel);
-    input.focus();
-  }
-
-  // ---------- Main dashboard ----------
   function renderShell() {
     app.innerHTML = "";
 
@@ -396,7 +307,6 @@
       el("div", { class: "toolbar" }, [
         el("span", { class: "updated", id: "updated-label", text: "" }),
         el("button", { class: "btn", id: "refresh-btn", text: "Actualizar" }),
-        el("button", { class: "icon-btn", id: "settings-btn", title: "Cambiar backend", text: "⚙" }),
       ]),
     ]);
     app.appendChild(header);
@@ -404,22 +314,10 @@
     var content = el("div", { id: "content" });
     app.appendChild(content);
 
-    var foot = el("footer", {}, [
-      el("span", { text: "Se actualiza solo cada minuto. " }),
-      (function () {
-        var b = el("button", { text: "Desconectar backend" });
-        b.addEventListener("click", function () {
-          clearApiUrl();
-          boot();
-        });
-        return b;
-      })(),
-    ]);
-    app.appendChild(foot);
+    app.appendChild(el("footer", {}, [
+      el("span", { text: "Se actualiza solo cada minuto." }),
+    ]));
 
-    document.getElementById("settings-btn").addEventListener("click", function () {
-      renderSetup(getApiUrl());
-    });
     document.getElementById("refresh-btn").addEventListener("click", function () {
       loadMetrics(true);
     });
@@ -439,7 +337,7 @@
 
   function renderError(message) {
     renderContentState(el("div", { class: "card state" }, [
-      el("div", { class: "big", text: "No se pudo conectar con el backend" }),
+      el("div", { class: "big", text: "No se pudo cargar el panel" }),
       el("div", { class: "small", text: message }),
     ]));
   }
@@ -462,7 +360,6 @@
 
     var content = el("div");
 
-    // Stat tiles
     var tiles = el("div", { class: "tiles" }, [
       statTile("Leads", totals.leads.toLocaleString("en-US"), null),
       statTile("Registrados en EXOPTION", totals.registros.toLocaleString("en-US"), totals.leads ? pct(totals.registros / totals.leads * 100) + " de los leads" : null),
@@ -480,7 +377,6 @@
       return;
     }
 
-    // Bar chart: ventas por agente vs meta
     var maxScale = Math.max(meta, agentes[0].ventasUSD || 0) * 1.15;
     var chartCard = el("div", { class: "card" });
     chartCard.appendChild(el("div", { class: "section-title", text: "Ventas por agente" }));
@@ -509,7 +405,6 @@
     ]));
     content.appendChild(el("section", {}, [chartCard]));
 
-    // Table: full detail per agent
     var tableCard = el("div", { class: "card table-scroll" });
     var table = el("table");
     table.appendChild(el("thead", {}, [
@@ -561,22 +456,20 @@
   }
 
   function loadMetrics(manual) {
-    var apiUrl = getApiUrl();
-    if (!apiUrl) return;
     var refreshBtn = document.getElementById("refresh-btn");
     if (refreshBtn) { refreshBtn.disabled = true; refreshBtn.textContent = "Actualizando…"; }
     if (manual) renderLoading();
 
-    fetch(apiUrl + "/metrics")
+    fetch("/metrics")
       .then(function (res) {
-        if (!res.ok) throw new Error("El backend respondió con un error (código " + res.status + ")");
+        if (!res.ok) throw new Error("El servidor respondió con un error (código " + res.status + ")");
         return res.json();
       })
       .then(function (data) {
         renderData(data);
       })
       .catch(function (err) {
-        renderError(err.message || "No se pudo obtener /metrics. Revisá que la URL sea correcta y que el backend esté publicado.");
+        renderError(err.message || "No se pudo obtener /metrics.");
       })
       .finally(function () {
         if (refreshBtn) { refreshBtn.disabled = false; refreshBtn.textContent = "Actualizar"; }
@@ -584,12 +477,6 @@
   }
 
   function boot() {
-    if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
-    var apiUrl = getApiUrl();
-    if (!apiUrl) {
-      renderSetup();
-      return;
-    }
     renderShell();
     renderLoading();
     loadMetrics(false);

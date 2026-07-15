@@ -1,13 +1,16 @@
-CREATE TABLE IF NOT EXISTS eventos (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  contacto_id TEXT NOT NULL,
-  agente TEXT NOT NULL,
-  tipo TEXT NOT NULL CHECK (tipo IN ('lead', 'registro', 'ftd', 'venta')),
-  monto REAL,
-  fecha TEXT NOT NULL,
-  creado_en TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE (contacto_id, tipo)
+create table if not exists eventos (
+  id bigint generated always as identity primary key,
+  contacto_id text not null,
+  agente text not null,
+  tipo text not null check (tipo in ('lead', 'registro', 'ftd', 'venta')),
+  monto numeric,
+  fecha timestamptz not null,
+  creado_en timestamptz not null default now(),
+  unique (contacto_id, tipo)
 );
 
-CREATE INDEX IF NOT EXISTS idx_eventos_agente ON eventos (agente);
-CREATE INDEX IF NOT EXISTS idx_eventos_tipo ON eventos (tipo);
+create index if not exists idx_eventos_agente on eventos (agente);
+create index if not exists idx_eventos_tipo on eventos (tipo);
+
+-- Sin políticas: solo la service_role key (usada por el backend) puede leer o escribir.
+alter table eventos enable row level security;
