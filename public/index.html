@@ -265,6 +265,33 @@
     font-size: 11px;
     color: var(--text-muted);
   }
+
+  /* ---- Login ---- */
+  .login {
+    max-width: 380px;
+    margin: 80px auto;
+  }
+  .login h2 { font-size: 17px; margin: 0 0 6px; }
+  .login p { font-size: 13px; color: var(--text-secondary); line-height: 1.5; margin: 0 0 4px; }
+  .login input {
+    width: 100%;
+    font: inherit;
+    font-size: 13px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--page);
+    color: var(--text-primary);
+    margin-top: 10px;
+  }
+  .login .error {
+    color: #d03b3b;
+    font-size: 12px;
+    min-height: 16px;
+    margin-top: 8px;
+  }
+  .login .btn { width: 100%; justify-content: center; margin-top: 4px; }
+  .whoami { font-size: 12px; color: var(--text-muted); }
 </style>
 </head>
 <body>
@@ -272,9 +299,14 @@
     <!-- content is rendered by JS -->
   </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script>
 (function () {
   "use strict";
+
+  var SUPABASE_URL = "https://lomxwrjtnyccophpjbjk.supabase.co";
+  var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxvbXh3cmp0bnljY29waHBqYmprIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQxMjY5NzMsImV4cCI6MjA5OTcwMjk3M30.CVSo51OrBwLGiF0FfmGt4gouxPajlWarjp4_6hdtVLU";
+  var supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
   var REFRESH_MS = 60000;
   var app = document.getElementById("app");
@@ -296,7 +328,45 @@
     return node;
   }
 
-  function renderShell() {
+  function renderLogin(errorMsg) {
+    app.innerHTML = "";
+    var panel = el("div", { class: "card login" }, [
+      el("h2", { text: "Conversión de Ventas" }),
+      el("p", { text: "Ingresá con el email y la contraseña que te dieron." }),
+    ]);
+    var emailInput = el("input", { type: "email", placeholder: "tu@email.com" });
+    var passInput = el("input", { type: "password", placeholder: "Contraseña" });
+    var error = el("div", { class: "error", text: errorMsg || "" });
+    var loginBtn = el("button", { class: "btn", text: "Entrar" });
+    loginBtn.addEventListener("click", function () {
+      var email = emailInput.value.trim();
+      var password = passInput.value;
+      if (!email || !password) {
+        error.textContent = "Completá email y contraseña.";
+        return;
+      }
+      loginBtn.disabled = true;
+      loginBtn.textContent = "Entrando…";
+      supabaseClient.auth.signInWithPassword({ email: email, password: password }).then(function (result) {
+        if (result.error) {
+          error.textContent = "Email o contraseña incorrectos.";
+          loginBtn.disabled = false;
+          loginBtn.textContent = "Entrar";
+          return;
+        }
+        boot();
+      });
+    });
+    passInput.addEventListener("keydown", function (e) { if (e.key === "Enter") loginBtn.click(); });
+    panel.appendChild(emailInput);
+    panel.appendChild(passInput);
+    panel.appendChild(error);
+    panel.appendChild(loginBtn);
+    app.appendChild(panel);
+    emailInput.focus();
+  }
+
+  function renderShell(email) {
     app.innerHTML = "";
 
     var header = el("header", {}, [
@@ -305,8 +375,10 @@
         el("p", { class: "subtitle", text: "Leads → Registro EXOPTION → FTD → Venta de membresía, por agente" }),
       ]),
       el("div", { class: "toolbar" }, [
+        el("span", { class: "whoami", text: email || "" }),
         el("span", { class: "updated", id: "updated-label", text: "" }),
         el("button", { class: "btn", id: "refresh-btn", text: "Actualizar" }),
+        el("button", { class: "btn", id: "logout-btn", text: "Salir" }),
       ]),
     ]);
     app.appendChild(header);
@@ -320,6 +392,9 @@
 
     document.getElementById("refresh-btn").addEventListener("click", function () {
       loadMetrics(true);
+    });
+    document.getElementById("logout-btn").addEventListener("click", function () {
+      supabaseClient.auth.signOut().then(boot);
     });
   }
 
@@ -455,13 +530,15 @@
     return el("div", { class: "card tile" }, children);
   }
 
-  function loadMetrics(manual) {
+  function loadMetrics(manual, accessToken) {
     var refreshBtn = document.getElementById("refresh-btn");
     if (refreshBtn) { refreshBtn.disabled = true; refreshBtn.textContent = "Actualizando…"; }
     if (manual) renderLoading();
 
-    fetch("/metrics")
+    fetch("/metrics", { headers: { Authorization: "Bearer " + accessToken } })
       .then(function (res) {
+        if (res.status === 401) throw new Error("Tu sesión venció, volvé a iniciar sesión.");
+        if (res.status === 403) throw new Error("Tu cuenta todavía no tiene acceso configurado. Pedile al director que te habilite.");
         if (!res.ok) throw new Error("El servidor respondió con un error (código " + res.status + ")");
         return res.json();
       })
@@ -477,10 +554,23 @@
   }
 
   function boot() {
-    renderShell();
-    renderLoading();
-    loadMetrics(false);
-    refreshTimer = setInterval(function () { loadMetrics(false); }, REFRESH_MS);
+    if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+    supabaseClient.auth.getSession().then(function (result) {
+      var session = result.data && result.data.session;
+      if (!session) {
+        renderLogin();
+        return;
+      }
+      renderShell(session.user && session.user.email);
+      renderLoading();
+      loadMetrics(false, session.access_token);
+      refreshTimer = setInterval(function () {
+        supabaseClient.auth.getSession().then(function (r) {
+          var s = r.data && r.data.session;
+          if (s) loadMetrics(false, s.access_token);
+        });
+      }, REFRESH_MS);
+    });
   }
 
   boot();

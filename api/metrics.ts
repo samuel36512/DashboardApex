@@ -13,7 +13,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
+  const authHeader = req.headers.authorization ?? "";
+  const accessToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  if (!accessToken) {
+    return res.status(401).json({ error: "No autorizado" });
+  }
+
   const supabase = getSupabase();
+
+  const { data: userData, error: userError } = await supabase.auth.getUser(accessToken);
+  if (userError || !userData?.user) {
+    return res.status(401).json({ error: "Sesion invalida o vencida" });
+  }
+
+  const { data: perfil, error: perfilError } = await supabase
+    .from("perfiles")
+    .select("rol, agentes(nombre)")
+    .eq("id", userData.user.id)
+    .maybeSingle();
+  if (perfilError || !perfil) {
+    return res.status(403).json({ error: "Tu cuenta no tiene un perfil asignado" });
+  }
+
   const { data, error } = await supabase.from("eventos").select("agente, tipo, monto");
   if (error) {
     return res.status(500).json({ error: "Error leyendo los datos" });
@@ -48,10 +69,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }))
     .sort((a, b) => a.agente.localeCompare(b.agente));
 
+  const rol = (perfil as any).rol as string;
+  const agenteRel = (perfil as any).agentes;
+  const miNombre: string | undefined = Array.isArray(agenteRel) ? agenteRel[0]?.nombre : agenteRel?.nombre;
+
+  const agentesFiltrados = rol === "agente" ? agentes.filter((a) => a.agente === miNombre) : agentes;
+
   res.setHeader("Cache-Control", "no-store");
   return res.status(200).json({
-    agentes,
+    agentes: agentesFiltrados,
     metaVentasUSD: Number(process.env.META_VENTAS_USD ?? 2400),
     actualizado: new Date().toISOString(),
+    rol,
   });
 }
