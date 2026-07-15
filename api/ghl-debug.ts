@@ -19,31 +19,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     Authorization: `Bearer ${token}`,
     Version: GHL_VERSION,
     Accept: "application/json",
+    "Content-Type": "application/json",
   };
 
-  const targetTags = ["ftd-efectuado", "registrado"];
+  // Intento 1: buscar contactos por tag directamente, sin depender del orden de creación.
+  const searchBody = {
+    locationId,
+    pageLimit: 20,
+    filters: [{ field: "tags", operator: "contains", value: "registrado" }],
+    sort: [{ field: "dateUpdated", direction: "desc" }],
+  };
 
-  const [contactsRes, fieldsRes] = await Promise.all([
-    fetch(`${GHL_BASE}/contacts/?locationId=${locationId}&limit=100`, { headers }),
-    fetch(`${GHL_BASE}/locations/${locationId}/customFields`, { headers }),
-  ]);
-
-  const contactsBody: any = await contactsRes.json().catch(() => ({ parseError: true }));
-  const fieldsBody = await fieldsRes.json().catch(() => ({ parseError: true }));
-
-  const allContacts: any[] = Array.isArray(contactsBody?.contacts) ? contactsBody.contacts : [];
-  const matchingContacts = allContacts
-    .filter((c) => Array.isArray(c.tags) && c.tags.some((t: string) => targetTags.includes(t)))
-    .map((c) => ({
-      id: c.id,
-      tags: c.tags,
-      assignedTo: c.assignedTo,
-      customFields: c.customFields,
-    }));
+  const searchRes = await fetch(`${GHL_BASE}/contacts/search`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(searchBody),
+  });
+  const searchBodyResult = await searchRes.json().catch(() => ({ parseError: true }));
 
   return res.status(200).json({
-    totalContactsFetched: allContacts.length,
-    matchingContacts,
-    customFieldDefinitions: { status: fieldsRes.status, body: fieldsBody },
+    intento: "POST /contacts/search con filtro de tag",
+    requestEnviado: searchBody,
+    status: searchRes.status,
+    respuesta: searchBodyResult,
   });
 }
