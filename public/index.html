@@ -292,6 +292,32 @@
   }
   .login .btn { width: 100%; justify-content: center; margin-top: 4px; }
   .whoami { font-size: 12px; color: var(--text-muted); }
+
+  /* ---- Admin panel ---- */
+  .admin-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--gridline);
+    flex-wrap: wrap;
+  }
+  .admin-row:last-child { border-bottom: none; }
+  .admin-name { font-size: 13px; min-width: 160px; }
+  .admin-row input {
+    font: inherit;
+    font-size: 12px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--page);
+    color: var(--text-primary);
+    min-width: 200px;
+    flex: 1;
+  }
+  .admin-badge-ok { font-size: 12px; color: var(--good); margin-left: auto; }
+  .admin-email { font-size: 12px; color: var(--text-muted); margin-left: auto; }
+  .admin-msg { font-size: 12px; color: var(--text-secondary); }
 </style>
 </head>
 <body>
@@ -311,6 +337,31 @@
   var REFRESH_MS = 60000;
   var app = document.getElementById("app");
   var refreshTimer = null;
+  var currentAccessToken = null;
+  var adminPanelOpen = false;
+
+  var KNOWN_EMAILS = {
+    "Ana Sánchez": "92anasp@gmail.com",
+    "Andry Camacho": "juliana1611sanchez@gmail.com",
+    "Angela Galindez": "Angela.Galindez@hotmail.com",
+    "Daniela Charry": "danielacharryp@gmail.com",
+    "Diego Alejandro Mora": "diego150905ruiz@gmail.com",
+    "Fernando Sandoval": "Sandovalandradefernando@gmail.com",
+    "Gabriel Alejandro Monteverde": "Gabrielmonteverde75@gmail.com",
+    "Henry Andrés Correa": "henryandrescorrea@hotmail.com",
+    "Jhon Camacho": "nxjaca25@gmail.com",
+    "Juan Ceballos": "Sebastianceballos0405@gmail.com",
+    "Juanita Sánchez": "princesamagicajuanita@gmail.com",
+    "Laura Charry": "laurasofia2297@gmail.com",
+    "Luis Felipe Charry": "pipech2220@gmail.com",
+    "Luis Gómez": "luis.andres162000@gmail.com",
+    "Luna Sandoval": "Linitajovel@gmail.com",
+    "María Paula Guevara": "mariapaulaguevaravalencia0@gmail.com",
+    "Nicolás Correa": "Nacr1204@gmail.com",
+    "Santiago Charry": "sentilli125@gmail.com",
+    "Santiago Sandoval": "santiagosandovalandrade95@gmail.com",
+    "Sergio Gallo": "vajumundial@gmail.com"
+  };
 
   var currency = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
   var currencyPrecise = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
@@ -398,6 +449,110 @@
     });
   }
 
+  function ensureAdminButton() {
+    if (document.getElementById("admin-btn")) return;
+    var toolbar = document.querySelector(".toolbar");
+    if (!toolbar) return;
+    var btn = el("button", { class: "btn", id: "admin-btn", text: "Agentes" });
+    btn.addEventListener("click", function () {
+      adminPanelOpen = !adminPanelOpen;
+      var existing = document.getElementById("admin-panel");
+      if (!adminPanelOpen) {
+        if (existing) existing.remove();
+        return;
+      }
+      loadAdminAgentes();
+    });
+    var logoutBtn = document.getElementById("logout-btn");
+    toolbar.insertBefore(btn, logoutBtn);
+  }
+
+  function loadAdminAgentes() {
+    var existing = document.getElementById("admin-panel");
+    if (existing) existing.remove();
+    var panel = el("div", { class: "card", id: "admin-panel" }, [
+      el("div", { class: "section-title", text: "Agentes y accesos" }),
+      el("div", { class: "section-desc", text: "Cargando…" }),
+    ]);
+    var header = document.querySelector("header");
+    header.insertAdjacentElement("afterend", panel);
+
+    fetch("/api/admin/agentes", { headers: { Authorization: "Bearer " + currentAccessToken } })
+      .then(function (res) {
+        return res.json().then(function (body) { return { status: res.status, body: body }; });
+      })
+      .then(function (r) {
+        if (r.status !== 200) throw new Error(r.body.error || "Error al cargar agentes");
+        renderAdminList(r.body.agentes);
+      })
+      .catch(function (err) {
+        panel.innerHTML = "";
+        panel.appendChild(el("div", { class: "section-title", text: "Agentes y accesos" }));
+        panel.appendChild(el("div", { class: "section-desc", text: err.message }));
+      });
+  }
+
+  function renderAdminList(agentes) {
+    var panel = document.getElementById("admin-panel");
+    if (!panel) return;
+    panel.innerHTML = "";
+    panel.appendChild(el("div", { class: "section-title", text: "Agentes y accesos" }));
+    panel.appendChild(el("div", { class: "section-desc", text: agentes.length + " agentes en tu equipo. Cada uno ve solo sus propios datos al iniciar sesión." }));
+
+    agentes.forEach(function (a) {
+      if (a.tieneAcceso) {
+        panel.appendChild(el("div", { class: "admin-row" }, [
+          el("span", { class: "admin-name", text: a.nombre }),
+          el("span", { class: "admin-email", text: a.email }),
+          el("span", { class: "admin-badge-ok", text: "✓ Con acceso" }),
+        ]));
+        return;
+      }
+      var emailInput = el("input", { type: "email", value: KNOWN_EMAILS[a.nombre] || "" });
+      var msg = el("span", { class: "admin-msg" });
+      var btn = el("button", { class: "btn", text: "Crear acceso" });
+      btn.addEventListener("click", function () {
+        var email = emailInput.value.trim();
+        if (!email) {
+          msg.textContent = "Falta el email";
+          return;
+        }
+        btn.disabled = true;
+        btn.textContent = "Creando…";
+        fetch("/api/admin/crear-login-agente", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: "Bearer " + currentAccessToken },
+          body: JSON.stringify({ agenteId: a.id, email: email }),
+        })
+          .then(function (res) {
+            return res.json().then(function (body) { return { status: res.status, body: body }; });
+          })
+          .then(function (r) {
+            if (r.status !== 201) {
+              msg.textContent = r.body.error || "No se pudo crear";
+              btn.disabled = false;
+              btn.textContent = "Crear acceso";
+              return;
+            }
+            msg.textContent = "Contraseña: " + r.body.password + " — copiala y compartísela, no se vuelve a mostrar.";
+            btn.remove();
+            emailInput.disabled = true;
+          })
+          .catch(function () {
+            msg.textContent = "Error de red, probá de nuevo.";
+            btn.disabled = false;
+            btn.textContent = "Crear acceso";
+          });
+      });
+      panel.appendChild(el("div", { class: "admin-row" }, [
+        el("span", { class: "admin-name", text: a.nombre }),
+        emailInput,
+        btn,
+        msg,
+      ]));
+    });
+  }
+
   function renderContentState(node) {
     var content = document.getElementById("content");
     content.innerHTML = "";
@@ -422,6 +577,7 @@
   }
 
   function renderData(data) {
+    if (data.rol === "director") ensureAdminButton();
     var meta = Number(data.metaVentasUSD) || 2400;
     var agentes = (data.agentes || []).slice().sort(function (a, b) { return b.ventasUSD - a.ventasUSD; });
 
@@ -531,6 +687,7 @@
   }
 
   function loadMetrics(manual, accessToken) {
+    currentAccessToken = accessToken;
     var refreshBtn = document.getElementById("refresh-btn");
     if (refreshBtn) { refreshBtn.disabled = true; refreshBtn.textContent = "Actualizando…"; }
     if (manual) renderLoading();
@@ -555,6 +712,7 @@
 
   function boot() {
     if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+    adminPanelOpen = false;
     supabaseClient.auth.getSession().then(function (result) {
       var session = result.data && result.data.session;
       if (!session) {
