@@ -1082,12 +1082,12 @@
 
     var withStatus = agentes.map(function (a) {
       var eventos = eventosEnVentana(a.conversionesRecientes || [], preset);
-      var tieneFtd = eventos.some(function (e) { return e.tipo === "ftd"; });
-      var tieneRegistro = eventos.some(function (e) { return e.tipo === "registro"; });
-      var estado = tieneFtd ? "ftd" : (tieneRegistro ? "registro" : "ninguno");
+      var numFtd = eventos.filter(function (e) { return e.tipo === "ftd"; }).length;
+      var numRegistro = eventos.filter(function (e) { return e.tipo === "registro"; }).length;
+      var estado = numFtd > 0 ? "ftd" : (numRegistro > 0 ? "registro" : "ninguno");
       var todasFechas = (a.conversionesRecientes || []).map(function (e) { return e.fecha; });
       var masReciente = todasFechas.length ? todasFechas.slice().sort().pop() : "";
-      return { agente: a.agente, estado: estado, fechaOrden: masReciente };
+      return { agente: a.agente, estado: estado, numFtd: numFtd, numRegistro: numRegistro, fechaOrden: masReciente };
     });
     withStatus.sort(function (a, b) {
       if (ESTADO_ORDEN[a.estado] !== ESTADO_ORDEN[b.estado]) return ESTADO_ORDEN[a.estado] - ESTADO_ORDEN[b.estado];
@@ -1117,10 +1117,14 @@
       card.appendChild(el("div", { class: "section-desc", text: "Todavía no hay agentes para revisar." }));
     }
     withStatus.forEach(function (s) {
+      var detalle = [];
+      if (s.numFtd > 0) detalle.push(s.numFtd + (s.numFtd === 1 ? " FTD" : " FTDs"));
+      if (s.numRegistro > 0) detalle.push(s.numRegistro + (s.numRegistro === 1 ? " registro" : " registros"));
+      var texto = ESTADO_TEXTO[s.estado] + (detalle.length ? " (" + detalle.join(", ") + ")" : "");
       card.appendChild(el("div", { class: "inact-row " + s.estado }, [
         el("div", { class: "inact-dot" }),
         el("div", { class: "agente-name", text: s.agente }),
-        el("div", { class: "inact-status", text: ESTADO_TEXTO[s.estado] }),
+        el("div", { class: "inact-status", text: texto }),
       ]));
     });
     content.appendChild(el("section", {}, [card]));
