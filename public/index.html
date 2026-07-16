@@ -220,6 +220,46 @@
   .swatch { width: 10px; height: 10px; border-radius: 2px; background: var(--series-1); }
   .swatch.line { width: 2px; height: 12px; border-radius: 0; background: var(--text-primary); opacity: 0.45; }
 
+  /* ---- FTD ranking ---- */
+  .rank-row {
+    display: grid;
+    grid-template-columns: 32px 1fr auto;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--gridline);
+  }
+  .rank-row:last-child { border-bottom: none; }
+  .rank-num {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .rank-row.top .rank-num {
+    background: var(--series-1);
+    border-color: var(--series-1);
+    color: #14110a;
+  }
+  .rank-row .agente-name { font-size: 13px; }
+  .rank-row .rank-ftd {
+    font-size: 15px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .rank-row .rank-ftd small {
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--text-muted);
+    margin-left: 4px;
+  }
+
   /* ---- Table ---- */
   table {
     width: 100%;
@@ -717,6 +757,22 @@
       el("div", { class: "legend-item" }, [el("div", { class: "swatch line" }), el("span", { text: "Meta ($" + meta.toLocaleString("en-US") + ")" })]),
     ]));
     content.appendChild(el("section", {}, [chartCard]));
+
+    var porFtd = agentes.slice().sort(function (a, b) { return (b.ftds || 0) - (a.ftds || 0); });
+    var rankCard = el("div", { class: "card" });
+    rankCard.appendChild(el("div", { class: "section-title", text: "Ranking de FTD" }));
+    rankCard.appendChild(el("div", { class: "section-desc", text: "De mejor a peor por FTD convertido. Se reordena solo cuando cambian los números." }));
+    porFtd.forEach(function (a, i) {
+      rankCard.appendChild(el("div", { class: "rank-row" + (i === 0 ? " top" : "") }, [
+        el("div", { class: "rank-num", text: String(i + 1) }),
+        el("div", { class: "agente-name", text: a.agente, title: a.agente }),
+        el("div", { class: "rank-ftd" }, [
+          document.createTextNode(String(a.ftds || 0)),
+          el("small", { text: "FTD" }),
+        ]),
+      ]));
+    });
+    content.appendChild(el("section", {}, [rankCard]));
 
     var tableCard = el("div", { class: "card table-scroll" });
     var table = el("table");
