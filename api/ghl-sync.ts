@@ -3,10 +3,11 @@ import { getSupabase } from "./_lib/supabase";
 
 const GHL_BASE = "https://services.leadconnectorhq.com";
 const GHL_VERSION = "2021-07-28";
-const TIME_BUDGET_MS = 20000;
+const TIME_BUDGET_MS = 32000;
 const REQUEST_TIMEOUT_MS = 12000;
 const CURSOR_KEY = "ghl_sync_cursor";
 const PAGE_LIMIT = 100;
+const CONTACT_LOOKUP_BATCH = 10;
 
 const PIPELINE_ID = "oRjd1pUxOgNbzkdLBjWC";
 const FTD_STAGE_ID = "3796b590-4fa6-4ef9-9b27-4aca989f6fd3";
@@ -49,36 +50,17 @@ function timeLeft(started: number): number {
   return TIME_BUDGET_MS - (Date.now() - started);
 }
 
-// Trae TODOS los pares (contacto_id, agente) ya guardados como "lead" en
-// nuestra base. Esto ya esta validado como exacto (coincide con GHL contacto
-// por contacto), asi que sirve como fuente confiable de "a que agente
-// pertenece este contacto" - ni el assignedTo de la oportunidad ni el listado
-// de oportunidades embebido en el contacto resultaron confiables para esto.
-async function cargarMapaContactoAgente(supabase: Supabase): Promise<Map<string, string>> {
-  const mapa = new Map<string, string>();
-  const PAGE = 1000;
-  for (let offset = 0; ; offset += PAGE) {
-    const { data, error } = await supabase
-      .from("eventos")
-      .select("contacto_id, agente")
-      .eq("tipo", "lead")
-      .range(offset, offset + PAGE - 1);
-    if (error) throw new Error(`Error leyendo leads para el mapa: ${error.message}`);
-    for (const row of data ?? []) mapa.set(row.contacto_id, row.agente);
-    if (!data || data.length < PAGE) break;
-  }
-  return mapa;
-}
-
-// Registro y FTD se sacan de TODAS las oportunidades del Pipeline principal
+// Registro y FTD se sacan de las oportunidades del Pipeline principal
 // (Registrado es la etapa de entrada, asi que estar en el pipeline ya cuenta
 // como registro; FTD Efectuado especificamente cuenta como ftd). El agente se
-// determina cruzando el contactId contra el mapa de leads, no contra el
-// assignedTo de la oportunidad (que puede desincronizarse del dueno real).
+// determina consultando el dueno ACTUAL del contacto en vivo contra GHL -
+// confirmado con datos reales que ni el assignedTo de la oportunidad ni una
+// copia guardada de "quien es el dueno" son confiables, porque los contactos
+// se reasignan entre agentes con el tiempo y esas fuentes quedan desactualizadas.
 async function syncOportunidades(
   headers: Record<string, string>,
   locationId: string,
-  contactoAgente: Map<string, string>,
+  agentesById: Map<string, string>,
   supabase: Supabase,
   started: number,
   cursor: StageCursor | undefined
@@ -88,7 +70,7 @@ async function syncOportunidades(
   let revisadas = 0;
   let eventosGuardados = 0;
 
-  while (timeLeft(started) > 5000) {
+  while (timeLeft(started) > 8000) {
     const params = new URLSearchParams({
       location_id: locationId,
       pipeline_id: PIPELINE_ID,
@@ -107,10 +89,29 @@ async function syncOportunidades(
       return { done: true, cursor: undefined, revisadas, eventosGuardados };
     }
 
+    // Dueno actual en vivo, en lotes chicos para no saturar.
+    const contactoAAgente = new Map<string, string | null>();
+    for (let i = 0; i < opportunities.length; i += CONTACT_LOOKUP_BATCH) {
+      const lote = opportunities.slice(i, i + CONTACT_LOOKUP_BATCH);
+      const resultados = await Promise.all(
+        lote.map(async (o) => {
+          if (!o.contactId) return null;
+          const cr = await fetchWithTimeout(`${GHL_BASE}/contacts/${o.contactId}`, { headers });
+          if (!cr.ok) return null;
+          const cbody: any = await cr.json().catch(() => null);
+          const assignedTo = cbody?.contact?.assignedTo as string | undefined;
+          return { contactId: o.contactId as string, agente: assignedTo ? agentesById.get(assignedTo) ?? null : null };
+        })
+      );
+      for (const res of resultados) {
+        if (res) contactoAAgente.set(res.contactId, res.agente);
+      }
+    }
+
     const rows: EventoRow[] = [];
     for (const o of opportunities) {
       revisadas++;
-      const agente = contactoAgente.get(o.contactId);
+      const agente = contactoAAgente.get(o.contactId);
       if (!agente) continue;
       const fechaRegistro = o.createdAt || o.lastStageChangeAt || o.updatedAt || new Date().toISOString();
       rows.push({ contacto_id: o.contactId, agente, tipo: "registro", fecha: fechaRegistro });
@@ -219,6 +220,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (agentesList.length === 0) {
     return res.status(200).json({ ok: true, note: "La tabla agentes esta vacia, nada para sincronizar" });
   }
+  const agentesById = new Map<string, string>(agentesList.map((a) => [a.ghl_user_id, a.nombre]));
 
   const { data: cursorRow } = await supabase.from("sync_state").select("value").eq("key", CURSOR_KEY).maybeSingle();
   const cursorState: CursorState = (cursorRow?.value as CursorState) || {};
@@ -234,12 +236,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const nextCursor: CursorState = {};
 
   try {
-    const contactoAgente = await cargarMapaContactoAgente(supabase);
-
     const oportunidadesResult = await syncOportunidades(
       headers,
       locationId,
-      contactoAgente,
+      agentesById,
       supabase,
       started,
       cursorState.oportunidades
