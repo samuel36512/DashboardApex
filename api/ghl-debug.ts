@@ -1,9 +1,85 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { getSupabase } from "./_lib/supabase";
 
 const GHL_BASE = "https://services.leadconnectorhq.com";
 const GHL_VERSION = "2021-07-28";
 const PIPELINE_ID = "oRjd1pUxOgNbzkdLBjWC";
 const FTD_STAGE_ID = "3796b590-4fa6-4ef9-9b27-4aca989f6fd3";
+const PAGE_LIMIT = 100;
+
+// Compara, para un agente puntual, todas sus oportunidades de un tipo
+// (registro/ftd) segun GHL contra lo que ya tenemos guardado en la base -
+// asi identificamos exactamente cuales faltan (y sus fechas), sin tener que
+// revisar cliente por cliente a mano.
+async function compararAgente(
+  headers: Record<string, string>,
+  locationId: string,
+  agenteNombre: string,
+  tipo: "registro" | "ftd"
+) {
+  const supabase = getSupabase();
+  const { data: agenteRow, error: agenteError } = await supabase
+    .from("agentes")
+    .select("ghl_user_id, nombre")
+    .ilike("nombre", `%${agenteNombre}%`)
+    .maybeSingle();
+  if (agenteError || !agenteRow) {
+    return { error: `No encontre un agente que coincida con "${agenteNombre}"` };
+  }
+
+  const opportunities: any[] = [];
+  let startAfter: number | undefined;
+  let startAfterId: string | undefined;
+  for (;;) {
+    const params = new URLSearchParams({
+      location_id: locationId,
+      pipeline_id: PIPELINE_ID,
+      assigned_to: agenteRow.ghl_user_id,
+      limit: String(PAGE_LIMIT),
+    });
+    if (tipo === "ftd") params.set("pipeline_stage_id", FTD_STAGE_ID);
+    if (startAfter !== undefined && startAfterId) {
+      params.set("startAfter", String(startAfter));
+      params.set("startAfterId", startAfterId);
+    }
+    const r = await fetch(`${GHL_BASE}/opportunities/search?${params.toString()}`, { headers });
+    if (!r.ok) return { error: `GHL /opportunities/search respondio ${r.status}` };
+    const data: any = await r.json();
+    const pagina: any[] = Array.isArray(data?.opportunities) ? data.opportunities : [];
+    if (pagina.length === 0) break;
+    opportunities.push(...pagina);
+    const meta = data?.meta;
+    if (!meta?.nextPage || pagina.length < PAGE_LIMIT) break;
+    startAfter = meta.startAfter;
+    startAfterId = meta.startAfterId;
+  }
+
+  const { data: guardados } = await supabase
+    .from("eventos")
+    .select("contacto_id")
+    .eq("agente", agenteRow.nombre)
+    .eq("tipo", tipo);
+  const idsGuardados = new Set((guardados ?? []).map((r) => r.contacto_id));
+
+  const faltantes = opportunities
+    .filter((o) => o.contactId && !idsGuardados.has(o.contactId))
+    .map((o) => ({
+      contactId: o.contactId,
+      opportunityId: o.id,
+      pipelineStageId: o.pipelineStageId,
+      createdAt: o.createdAt,
+      lastStageChangeAt: o.lastStageChangeAt,
+      updatedAt: o.updatedAt,
+    }));
+
+  return {
+    agente: agenteRow.nombre,
+    tipo,
+    totalEnGhl: opportunities.length,
+    totalGuardado: idsGuardados.size,
+    faltantesEnBaseDeDatos: faltantes,
+  };
+}
 
 // Busca un cliente por nombre directo en GHL y muestra sus oportunidades en
 // el pipeline principal (etapa, fechas, dueno asignado), para diagnosticar
@@ -12,16 +88,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const secret = process.env.WEBHOOK_SECRET;
   if (!secret || req.query.key !== secret) {
     return res.status(401).json({ error: "No autorizado. Agregá ?key=TU_WEBHOOK_SECRET a la URL." });
-  }
-
-  const nombre = typeof req.query.nombre === "string" ? req.query.nombre.trim() : "";
-  const contactId = typeof req.query.contactId === "string" ? req.query.contactId.trim() : "";
-  const opportunityId = typeof req.query.opportunityId === "string" ? req.query.opportunityId.trim() : "";
-  if (!nombre && !contactId && !opportunityId) {
-    return res.status(400).json({
-      error:
-        "Agregá ?nombre=NombreDelCliente, o ?contactId=ID, o ?opportunityId=ID (el ID lo copiás de la URL de GHL cuando abrís el contacto/oportunidad)",
-    });
   }
 
   const token = process.env.GHL_API_TOKEN;
@@ -35,6 +101,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     Version: GHL_VERSION,
     Accept: "application/json",
   };
+
+  const agenteQuery = typeof req.query.agente === "string" ? req.query.agente.trim() : "";
+  if (agenteQuery) {
+    const tipo = req.query.tipo === "registro" ? "registro" : "ftd";
+    const comparacion = await compararAgente(headers, locationId, agenteQuery, tipo);
+    return res.status(200).json(comparacion);
+  }
+
+  const nombre = typeof req.query.nombre === "string" ? req.query.nombre.trim() : "";
+  const contactId = typeof req.query.contactId === "string" ? req.query.contactId.trim() : "";
+  const opportunityId = typeof req.query.opportunityId === "string" ? req.query.opportunityId.trim() : "";
+  if (!nombre && !contactId && !opportunityId) {
+    return res.status(400).json({
+      error:
+        "Agregá ?agente=NombreAgente (compara todo su registro/ftd), o ?nombre=NombreDelCliente, o ?contactId=ID, o ?opportunityId=ID",
+    });
+  }
 
   let contacts: any[] = [];
 
