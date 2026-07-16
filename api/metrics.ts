@@ -41,16 +41,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: "desde/hasta deben ser fechas validas (YYYY-MM-DD)" });
   }
 
-  // registro_manual es el total historico que confirmo el director a mano
-  // (de antes de que el sync automatico empezara a trackear registro por
-  // fecha). Solo suma en la vista "Todo" (sin filtro de fecha): no tiene
-  // fecha propia, asi que no puede desglosarse por Hoy/Semana/Mes - esas
-  // vistas muestran unicamente lo que el sync automatico ya trackeo con
-  // fecha real desde que se activo.
-  const sinFiltroFecha = !desde && !hasta;
+  // Registro y ftd ahora se sincronizan completos con fecha real (por etapa
+  // del pipeline), asi que ya no hace falta sumar un total manual aparte -
+  // todo sale de eventos, igual que lead/venta.
   const { data: agentesRows, error: agentesError } = await supabase
     .from("agentes")
-    .select("nombre, registro_manual")
+    .select("nombre")
     .eq("activo", true);
   if (agentesError) {
     return res.status(500).json({ error: "Error leyendo agentes" });
@@ -58,7 +54,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const byAgent = new Map<string, AgentAgg>();
   for (const a of agentesRows ?? []) {
-    byAgent.set(a.nombre, { leads: 0, registros: sinFiltroFecha ? a.registro_manual ?? 0 : 0, ftds: 0, ventasUSD: 0 });
+    byAgent.set(a.nombre, { leads: 0, registros: 0, ftds: 0, ventasUSD: 0 });
   }
 
   // Supabase/PostgREST limita cada consulta a un maximo de filas (tipicamente

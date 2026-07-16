@@ -15,7 +15,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { data: agentesRows, error: agentesError } = await supabase
     .from("agentes")
-    .select("id, nombre, registro_manual")
+    .select("id, nombre")
     .eq("activo", true)
     .order("nombre");
   if (agentesError) {
@@ -39,7 +39,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const agentes = (agentesRows ?? []).map((a) => ({
     id: a.id,
     nombre: a.nombre,
-    registroManual: a.registro_manual ?? 0,
     tieneAcceso: emailByAgenteId.has(a.id),
     email: emailByAgenteId.get(a.id) ?? null,
   }));

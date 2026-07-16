@@ -6,7 +6,6 @@ const GHL_VERSION = "2021-07-28";
 const TIME_BUDGET_MS = 32000;
 const REQUEST_TIMEOUT_MS = 12000;
 const CURSOR_KEY = "ghl_sync_cursor";
-const CUTOFF_KEY = "registro_ftd_cutoff";
 const PAGE_LIMIT = 100;
 const MAX_RETRIES_429 = 4;
 
@@ -57,29 +56,23 @@ function timeLeft(started: number): number {
   return TIME_BUDGET_MS - (Date.now() - started);
 }
 
-// Trae TODAS las oportunidades del Pipeline principal en una etapa puntual
-// (sin filtrar por agente - esto ya esta probado como exacto) y arma
-// directamente las filas nuevas, usando el dueno de la OPORTUNIDAD (no del
-// contacto): registro y ftd son oportunidades independientes por contacto
-// (al hacer FTD se crea una oportunidad nueva, no se mueve la de registro),
-// asi que cada etapa se consulta y guarda por separado.
+// Trae TODAS las oportunidades del Pipeline principal en una etapa puntual,
+// sin importar la fecha (el sync por etapa ya se valido como exacto, asi que
+// no hace falta limitar a "lo nuevo" como antes) y arma directamente las
+// filas, usando el dueno de la OPORTUNIDAD (no del contacto): registro y ftd
+// son oportunidades independientes por contacto (al hacer FTD se crea una
+// oportunidad nueva, no se mueve la de registro), asi que cada etapa se
+// consulta y guarda por separado, con su fecha real.
 //
 // Por que el dueno de la oportunidad y no el del contacto: el contacto se
 // reasigna con el tiempo (soporte/verificacion) y su "assignedTo" deja de
 // reflejar quien trabajo la venta. El de la oportunidad no se toca con eso.
-//
-// cutoffMs: los numeros historicos (de antes de este corte) ya quedaron
-// sembrados a mano en la base con los valores reales que confirmo el
-// director, porque la atribucion por "dueno actual" en GHL no coincide con
-// esos totales viejos (mucho tiempo para que se reasignen). De aca en
-// adelante solo sumamos lo que pasa DESPUES del corte.
 async function cargarEtapaPipeline(
   headers: Record<string, string>,
   locationId: string,
   stageId: string,
   tipo: "registro" | "ftd",
   fechaDe: (o: any) => string,
-  cutoffMs: number,
   agentesById: Map<string, string>
 ) {
   const rows: EventoRow[] = [];
@@ -116,10 +109,7 @@ async function cargarEtapaPipeline(
         continue;
       }
 
-      const fecha = fechaDe(o);
-      if (new Date(fecha).getTime() > cutoffMs) {
-        rows.push({ contacto_id: o.contactId, agente, tipo, fecha });
-      }
+      rows.push({ contacto_id: o.contactId, agente, tipo, fecha: fechaDe(o) });
     }
 
     const meta = data?.meta;
@@ -221,9 +211,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { data: cursorRow } = await supabase.from("sync_state").select("value").eq("key", CURSOR_KEY).maybeSingle();
   const cursorState: CursorState = (cursorRow?.value as CursorState) || {};
 
-  const { data: cutoffRow } = await supabase.from("sync_state").select("value").eq("key", CUTOFF_KEY).maybeSingle();
-  const cutoffMs = cutoffRow?.value ? new Date(cutoffRow.value as string).getTime() : Date.now();
-
   const headers = {
     Authorization: `Bearer ${token}`,
     Version: GHL_VERSION,
@@ -241,7 +228,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       REGISTRADO_STAGE_ID,
       "registro",
       (o) => o.createdAt || o.updatedAt || new Date().toISOString(),
-      cutoffMs,
       agentesById
     );
     const ftd = await cargarEtapaPipeline(
@@ -250,7 +236,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       FTD_STAGE_ID,
       "ftd",
       (o) => o.lastStageChangeAt || o.updatedAt || o.createdAt || new Date().toISOString(),
-      cutoffMs,
       agentesById
     );
     const pipelineRows = [...registro.rows, ...ftd.rows];
