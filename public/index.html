@@ -318,6 +318,8 @@
   .admin-badge-ok { font-size: 12px; color: var(--good); margin-left: auto; }
   .admin-email { font-size: 12px; color: var(--text-muted); margin-left: auto; }
   .admin-msg { font-size: 12px; color: var(--text-secondary); }
+  .admin-row input.admin-num-input { min-width: 70px; max-width: 90px; flex: none; margin-left: auto; }
+  .admin-section-gap { margin-top: 18px; }
 
   /* ---- Date filter ---- */
   .filter-row {
@@ -621,6 +623,48 @@
         emailInput,
         btn,
         msg,
+      ]));
+    });
+
+    panel.appendChild(el("div", { class: "section-title admin-section-gap", text: "Registro (manual)" }));
+    panel.appendChild(el("div", { class: "section-desc", text: "GHL no identifica de forma confiable quién ya registró, así que este número lo actualizás vos a mano." }));
+
+    agentes.forEach(function (a) {
+      var registroInput = el("input", { class: "admin-num-input", type: "number", min: "0", step: "1", value: String(a.registroManual || 0) });
+      var saveMsg = el("span", { class: "admin-msg" });
+      var saveBtn = el("button", { class: "btn", text: "Guardar" });
+      saveBtn.addEventListener("click", function () {
+        var registro = Number(registroInput.value);
+        if (!Number.isFinite(registro) || registro < 0) {
+          saveMsg.textContent = "Número inválido";
+          return;
+        }
+        saveBtn.disabled = true;
+        saveBtn.textContent = "Guardando…";
+        fetch("/api/admin/actualizar-registro", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: "Bearer " + currentAccessToken },
+          body: JSON.stringify({ agenteId: a.id, registro: registro }),
+        })
+          .then(function (res) {
+            return res.json().then(function (body) { return { status: res.status, body: body }; });
+          })
+          .then(function (r) {
+            saveBtn.disabled = false;
+            saveBtn.textContent = "Guardar";
+            saveMsg.textContent = r.status === 200 ? "Guardado ✓" : (r.body.error || "Error al guardar");
+          })
+          .catch(function () {
+            saveBtn.disabled = false;
+            saveBtn.textContent = "Guardar";
+            saveMsg.textContent = "Error de red, probá de nuevo.";
+          });
+      });
+      panel.appendChild(el("div", { class: "admin-row" }, [
+        el("span", { class: "admin-name", text: a.nombre }),
+        registroInput,
+        saveBtn,
+        saveMsg,
       ]));
     });
   }

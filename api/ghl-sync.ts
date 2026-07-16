@@ -37,7 +37,7 @@ async function fetchWithTimeout(url: string, options: RequestInit): Promise<Resp
 interface EventoRow {
   contacto_id: string;
   agente: string;
-  tipo: "lead" | "registro" | "ftd";
+  tipo: "lead" | "ftd";
   fecha: string;
 }
 
@@ -56,10 +56,15 @@ function timeLeft(started: number): number {
   return TIME_BUDGET_MS - (Date.now() - started);
 }
 
-// Trae TODAS las oportunidades del Pipeline principal (sin filtrar por
-// agente - esto ya esta probado como completo y exacto, coincide con los
-// totales del tablero de GHL) y arma directamente las filas de registro/ftd
-// nuevas, usando el dueno de la OPORTUNIDAD (no del contacto).
+// Trae TODAS las oportunidades del Pipeline principal en etapa FTD Efectuado
+// (sin filtrar por agente - esto ya esta probado como exacto) y arma
+// directamente las filas de FTD nuevas, usando el dueno de la OPORTUNIDAD
+// (no del contacto).
+//
+// Registro se saco de aca: la busqueda de oportunidades de GHL no identifica
+// de forma confiable a los que ya avanzaron a FTD, asi que registro no se
+// puede automatizar - el director lo actualiza a mano desde el panel de
+// admin (columna agentes.registro_manual).
 //
 // Por que el dueno de la oportunidad y no el del contacto: al convertir un
 // FTD el contacto casi siempre se reasigna enseguida a otra persona
@@ -67,12 +72,12 @@ function timeLeft(started: number): number {
 // hizo la venta. El "assignedTo" de la oportunidad no se toca con eso, asi
 // que sigue siendo quien realmente la trabajo.
 //
-// cutoffMs: los numeros historicos (de antes de este corte) ya quedaron
-// sembrados a mano en la base con los valores reales que confirmo el
-// director, porque la atribucion por "dueno actual" en GHL no coincide
+// cutoffMs: los numeros historicos de FTD (de antes de este corte) ya
+// quedaron sembrados a mano en la base con los valores reales que confirmo
+// el director, porque la atribucion por "dueno actual" en GHL no coincide
 // con esos totales viejos (mucho tiempo para que se reasignen). De aca en
 // adelante solo sumamos lo que pasa DESPUES del corte.
-async function cargarOportunidadesPipeline(
+async function cargarFtdPipeline(
   headers: Record<string, string>,
   locationId: string,
   cutoffMs: number,
@@ -88,6 +93,7 @@ async function cargarOportunidadesPipeline(
     const params = new URLSearchParams({
       location_id: locationId,
       pipeline_id: PIPELINE_ID,
+      pipeline_stage_id: FTD_STAGE_ID,
       status: "all",
       limit: String(PAGE_LIMIT),
     });
@@ -111,16 +117,9 @@ async function cargarOportunidadesPipeline(
         continue;
       }
 
-      const fechaRegistro = o.createdAt || o.lastStageChangeAt || o.updatedAt || new Date().toISOString();
-      if (new Date(fechaRegistro).getTime() > cutoffMs) {
-        rows.push({ contacto_id: o.contactId, agente, tipo: "registro", fecha: fechaRegistro });
-      }
-
-      if (o.pipelineStageId === FTD_STAGE_ID) {
-        const fechaFtd = o.lastStageChangeAt || o.updatedAt || o.createdAt || new Date().toISOString();
-        if (new Date(fechaFtd).getTime() > cutoffMs) {
-          rows.push({ contacto_id: o.contactId, agente, tipo: "ftd", fecha: fechaFtd });
-        }
+      const fechaFtd = o.lastStageChangeAt || o.updatedAt || o.createdAt || new Date().toISOString();
+      if (new Date(fechaFtd).getTime() > cutoffMs) {
+        rows.push({ contacto_id: o.contactId, agente, tipo: "ftd", fecha: fechaFtd });
       }
     }
 
@@ -237,7 +236,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const nextCursor: CursorState = {};
 
   try {
-    const { rows: pipelineRows, revisadas, sinDueno } = await cargarOportunidadesPipeline(
+    const { rows: pipelineRows, revisadas, sinDueno } = await cargarFtdPipeline(
       headers,
       locationId,
       cutoffMs,
@@ -249,14 +248,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const { error } = await supabase
           .from("eventos")
           .upsert(pipelineRows.slice(i, i + CHUNK), { onConflict: "contacto_id,tipo" });
-        if (error) throw new Error(`Error guardando registro/ftd: ${error.message}`);
+        if (error) throw new Error(`Error guardando ftd: ${error.message}`);
       }
     }
     resumen.pipeline = {
-      oportunidadesRevisadas: revisadas,
+      oportunidadesFtdRevisadas: revisadas,
       sinDuenoActivo: sinDueno,
-      registroNuevos: pipelineRows.filter((r) => r.tipo === "registro").length,
-      ftdNuevos: pipelineRows.filter((r) => r.tipo === "ftd").length,
+      ftdNuevos: pipelineRows.length,
     };
 
     let agentIndex = cursorState.leadsAgentIndex ?? 0;

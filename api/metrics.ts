@@ -41,13 +41,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: "desde/hasta deben ser fechas validas (YYYY-MM-DD)" });
   }
 
+  // Registro no se puede sincronizar de forma confiable desde GHL (su busqueda
+  // de oportunidades no identifica a los que ya avanzaron a FTD), asi que el
+  // director lo actualiza a mano desde el panel de admin. Por eso viene de la
+  // tabla agentes, no de eventos, y no responde al filtro de fecha.
+  const { data: agentesRows, error: agentesError } = await supabase
+    .from("agentes")
+    .select("nombre, registro_manual")
+    .eq("activo", true);
+  if (agentesError) {
+    return res.status(500).json({ error: "Error leyendo agentes" });
+  }
+
+  const byAgent = new Map<string, AgentAgg>();
+  for (const a of agentesRows ?? []) {
+    byAgent.set(a.nombre, { leads: 0, registros: a.registro_manual ?? 0, ftds: 0, ventasUSD: 0 });
+  }
+
   // Supabase/PostgREST limita cada consulta a un maximo de filas (tipicamente
   // 1000), asi que con una tabla grande hay que paginar explicitamente para
   // traer todo, si no los conteos quedan cortados.
   const PAGE = 1000;
-  const allRows: { agente: string; tipo: string; monto: number | null }[] = [];
   for (let offset = 0; ; offset += PAGE) {
-    let query = supabase.from("eventos").select("agente, tipo, monto").range(offset, offset + PAGE - 1);
+    let query = supabase
+      .from("eventos")
+      .select("agente, tipo, monto")
+      .in("tipo", ["lead", "ftd", "venta"])
+      .range(offset, offset + PAGE - 1);
     if (desde) query = query.gte("fecha", desde);
     if (hasta) query = query.lte("fecha", `${hasta}T23:59:59.999Z`);
 
@@ -55,20 +75,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (error) {
       return res.status(500).json({ error: "Error leyendo los datos" });
     }
-    allRows.push(...(page ?? []));
-    if (!page || page.length < PAGE) break;
-  }
-
-  const byAgent = new Map<string, AgentAgg>();
-  for (const row of allRows) {
-    if (!byAgent.has(row.agente)) {
-      byAgent.set(row.agente, { leads: 0, registros: 0, ftds: 0, ventasUSD: 0 });
+    for (const row of page ?? []) {
+      if (!byAgent.has(row.agente)) {
+        byAgent.set(row.agente, { leads: 0, registros: 0, ftds: 0, ventasUSD: 0 });
+      }
+      const agg = byAgent.get(row.agente)!;
+      if (row.tipo === "lead") agg.leads++;
+      else if (row.tipo === "ftd") agg.ftds++;
+      else if (row.tipo === "venta") agg.ventasUSD += Number(row.monto ?? 0);
     }
-    const agg = byAgent.get(row.agente)!;
-    if (row.tipo === "lead") agg.leads++;
-    else if (row.tipo === "registro") agg.registros++;
-    else if (row.tipo === "ftd") agg.ftds++;
-    else if (row.tipo === "venta") agg.ventasUSD += Number(row.monto ?? 0);
+    if (!page || page.length < PAGE) break;
   }
 
   const pct = (num: number, den: number) => (den > 0 ? Math.round((num / den) * 10000) / 100 : 0);
