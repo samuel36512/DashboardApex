@@ -19,6 +19,7 @@
     --series-1-soft: #3d3115;
     --good: #4caf6d;
     --warning: #e0a83c;
+    --danger: #e5484d;
   }
 
   * { box-sizing: border-box; }
@@ -487,10 +488,10 @@
     background: var(--good);
     flex: none;
   }
-  .inact-row.alert .inact-dot { background: var(--warning); }
+  .inact-row.alert .inact-dot { background: var(--danger); }
   .inact-row .agente-name { flex: 1; font-size: 13px; }
   .inact-row .inact-status { font-size: 12px; color: var(--text-muted); text-align: right; }
-  .inact-row.alert .inact-status { color: var(--warning); font-weight: 600; }
+  .inact-row.alert .inact-status { color: var(--danger); font-weight: 600; }
 </style>
 </head>
 <body>
@@ -508,7 +509,7 @@
   var supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
   var REFRESH_MS = 60000;
-  var INACTIVIDAD_DIAS = 3;
+  var INACTIVIDAD_DIAS = 1;
   var app = document.getElementById("app");
   var refreshTimer = null;
   var currentAccessToken = null;
@@ -613,7 +614,7 @@
     {
       view: "inactividad",
       label: "Alerta de inactividad",
-      desc: "Agentes sin un registro o FTD nuevo en los últimos " + INACTIVIDAD_DIAS + " días.",
+      desc: "Agentes sin un registro o FTD en las últimas 24 horas.",
     },
     {
       view: "dashboard",
@@ -1069,7 +1070,7 @@
     card.appendChild(el("div", { class: "section-title", text: "Alerta de inactividad" }));
     card.appendChild(el("div", {
       class: "section-desc",
-      text: "Agentes sin un registro o FTD nuevo en los últimos " + INACTIVIDAD_DIAS + " días.",
+      text: "Verde: tuvo un registro o FTD en las últimas 24 horas. Rojo: no.",
     }));
     if (withStatus.length === 0) {
       card.appendChild(el("div", { class: "section-desc", text: "Todavía no hay agentes para revisar." }));
