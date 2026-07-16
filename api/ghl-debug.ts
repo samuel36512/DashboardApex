@@ -118,6 +118,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     Accept: "application/json",
   };
 
+  if (req.query.pipelines === "1") {
+    const r = await fetch(`${GHL_BASE}/opportunities/pipelines?locationId=${locationId}`, { headers });
+    if (!r.ok) return res.status(502).json({ error: `GHL /opportunities/pipelines respondio ${r.status}` });
+    const data: any = await r.json();
+    const pipelines = Array.isArray(data?.pipelines) ? data.pipelines : [];
+    return res.status(200).json({
+      pipelines: pipelines.map((p: any) => ({
+        id: p.id,
+        name: p.name,
+        stages: (p.stages ?? []).map((s: any) => ({ id: s.id, name: s.name })),
+      })),
+    });
+  }
+
   const agenteQuery = typeof req.query.agente === "string" ? req.query.agente.trim() : "";
   if (agenteQuery) {
     const tipo = req.query.tipo === "registro" ? "registro" : "ftd";
