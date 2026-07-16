@@ -62,16 +62,31 @@ async function compararAgente(
     .eq("tipo", tipo);
   const idsGuardados = new Set((guardados ?? []).map((r) => r.contacto_id));
 
-  const faltantes = opportunities
-    .filter((o) => o.contactId && !idsGuardados.has(o.contactId))
-    .map((o) => ({
-      contactId: o.contactId,
-      opportunityId: o.id,
-      pipelineStageId: o.pipelineStageId,
-      createdAt: o.createdAt,
-      lastStageChangeAt: o.lastStageChangeAt,
-      updatedAt: o.updatedAt,
-    }));
+  const faltantesSinNombre = opportunities.filter((o) => o.contactId && !idsGuardados.has(o.contactId));
+
+  const faltantes = [];
+  const BATCH = 10;
+  for (let i = 0; i < faltantesSinNombre.length; i += BATCH) {
+    const lote = faltantesSinNombre.slice(i, i + BATCH);
+    const conNombre = await Promise.all(
+      lote.map(async (o) => {
+        const r = await fetch(`${GHL_BASE}/contacts/${o.contactId}`, { headers });
+        const body: any = r.ok ? await r.json().catch(() => ({})) : {};
+        const contact = body?.contact;
+        return {
+          contactId: o.contactId,
+          nombre: contact?.contactName || `${contact?.firstName ?? ""} ${contact?.lastName ?? ""}`.trim(),
+          opportunityId: o.id,
+          pipelineStageId: o.pipelineStageId,
+          createdAt: o.createdAt,
+          lastStageChangeAt: o.lastStageChangeAt,
+          updatedAt: o.updatedAt,
+        };
+      })
+    );
+    faltantes.push(...conNombre);
+  }
+  faltantes.sort((a, b) => (b.lastStageChangeAt || "").localeCompare(a.lastStageChangeAt || ""));
 
   return {
     agente: agenteRow.nombre,
