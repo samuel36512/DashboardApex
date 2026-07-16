@@ -83,6 +83,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!page || page.length < PAGE) break;
   }
 
+  // La ultima conversion (registro/ftd) se calcula SIEMPRE sin el filtro de
+  // fecha activo, para que la alerta de inactividad tenga sentido sin
+  // importar que vista de fechas este mirando el director.
+  const ultimaConversion = new Map<string, string>();
+  for (let offset = 0; ; offset += PAGE) {
+    const { data: page, error } = await supabase
+      .from("eventos")
+      .select("agente, fecha")
+      .in("tipo", ["registro", "ftd"])
+      .range(offset, offset + PAGE - 1);
+    if (error) {
+      return res.status(500).json({ error: "Error leyendo ultima actividad" });
+    }
+    for (const row of page ?? []) {
+      const actual = ultimaConversion.get(row.agente);
+      if (!actual || row.fecha > actual) ultimaConversion.set(row.agente, row.fecha);
+    }
+    if (!page || page.length < PAGE) break;
+  }
+
   const pct = (num: number, den: number) => (den > 0 ? Math.round((num / den) * 10000) / 100 : 0);
 
   const agentes = Array.from(byAgent.entries())
@@ -92,6 +112,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       registros: a.registros,
       ftds: a.ftds,
       ventasUSD: a.ventasUSD,
+      ultimaConversion: ultimaConversion.get(agente) || null,
       conversion: {
         leadToRegistro: pct(a.registros, a.leads),
         registroToFtd: pct(a.ftds, a.registros),
