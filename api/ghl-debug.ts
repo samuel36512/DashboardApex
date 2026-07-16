@@ -15,8 +15,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const nombre = typeof req.query.nombre === "string" ? req.query.nombre.trim() : "";
-  if (!nombre) {
-    return res.status(400).json({ error: "Agregá ?nombre=NombreDelCliente a la URL" });
+  const contactId = typeof req.query.contactId === "string" ? req.query.contactId.trim() : "";
+  const opportunityId = typeof req.query.opportunityId === "string" ? req.query.opportunityId.trim() : "";
+  if (!nombre && !contactId && !opportunityId) {
+    return res.status(400).json({
+      error:
+        "Agregá ?nombre=NombreDelCliente, o ?contactId=ID, o ?opportunityId=ID (el ID lo copiás de la URL de GHL cuando abrís el contacto/oportunidad)",
+    });
   }
 
   const token = process.env.GHL_API_TOKEN;
@@ -31,16 +36,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     Accept: "application/json",
   };
 
-  const searchParams = new URLSearchParams({ locationId, query: nombre, limit: "10" });
-  const contactsRes = await fetch(`${GHL_BASE}/contacts/?${searchParams.toString()}`, { headers });
-  if (!contactsRes.ok) {
-    return res.status(502).json({ error: `GHL /contacts respondio ${contactsRes.status}` });
+  let contacts: any[] = [];
+
+  if (opportunityId) {
+    const oppRes = await fetch(`${GHL_BASE}/opportunities/${opportunityId}`, { headers });
+    if (!oppRes.ok) {
+      return res.status(502).json({ error: `GHL /opportunities/${opportunityId} respondio ${oppRes.status}` });
+    }
+    const oppBody: any = await oppRes.json();
+    const opp = oppBody?.opportunity;
+    if (!opp?.contactId) {
+      return res.status(404).json({ error: "Esa oportunidad no tiene contactId asociado", raw: oppBody });
+    }
+    contacts = [{ id: opp.contactId }];
+  } else if (contactId) {
+    contacts = [{ id: contactId }];
+  } else {
+    const searchParams = new URLSearchParams({ locationId, query: nombre, limit: "10" });
+    const contactsRes = await fetch(`${GHL_BASE}/contacts/?${searchParams.toString()}`, { headers });
+    if (!contactsRes.ok) {
+      return res.status(502).json({ error: `GHL /contacts respondio ${contactsRes.status}` });
+    }
+    const contactsData: any = await contactsRes.json();
+    contacts = Array.isArray(contactsData?.contacts) ? contactsData.contacts : [];
   }
-  const contactsData: any = await contactsRes.json();
-  const contacts: any[] = Array.isArray(contactsData?.contacts) ? contactsData.contacts : [];
 
   const resultados = [];
   for (const c of contacts) {
+    const contactRes = await fetch(`${GHL_BASE}/contacts/${c.id}`, { headers });
+    const contactBody: any = contactRes.ok ? await contactRes.json() : null;
+    const contactFull = contactBody?.contact ?? c;
     const oppParams = new URLSearchParams({
       location_id: locationId,
       pipeline_id: PIPELINE_ID,
@@ -54,8 +79,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     resultados.push({
       contactId: c.id,
-      nombre: c.contactName || `${c.firstName ?? ""} ${c.lastName ?? ""}`.trim(),
-      contactoAsignadoA: c.assignedTo,
+      nombre: contactFull.contactName || `${contactFull.firstName ?? ""} ${contactFull.lastName ?? ""}`.trim(),
+      contactoAsignadoA: contactFull.assignedTo,
       totalOpportunitiesDevueltas: opportunities.length,
       opportunitiesDeEsteContacto: propias.map((o) => ({
         id: o.id,
@@ -69,5 +94,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   }
 
-  return res.status(200).json({ query: nombre, encontrados: resultados.length, resultados });
+  return res.status(200).json({
+    query: nombre || contactId || opportunityId,
+    encontrados: resultados.length,
+    resultados,
+  });
 }
