@@ -193,6 +193,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   await supabase.from("sync_state").upsert({ key: CURSOR_KEY, value: nextCursor });
 
+  res.setHeader("Cache-Control", "no-store");
   return res.status(200).json({
     ok: true,
     agentesProcesados,
