@@ -616,12 +616,6 @@
       label: "Alerta de inactividad",
       desc: "Agentes sin un registro o FTD en las últimas 24 horas.",
     },
-    {
-      view: "dashboard",
-      preset: "todo",
-      label: "Todo completo",
-      desc: "El histórico completo del equipo, sin filtrar por fecha.",
-    },
   ];
 
   function renderWelcome() {
@@ -1076,7 +1070,7 @@
       card.appendChild(el("div", { class: "section-desc", text: "Todavía no hay agentes para revisar." }));
     }
     withStatus.forEach(function (s) {
-      var estado = s.dias === null ? "Sin conversiones todavía" : (s.dias === 0 ? "Hoy" : "Hace " + s.dias + (s.dias === 1 ? " día" : " días"));
+      var estado = s.alerta ? "24h sin FTD ni registro" : "Hizo FTD o registro hoy";
       card.appendChild(el("div", { class: "inact-row" + (s.alerta ? " alert" : "") }, [
         el("div", { class: "inact-dot" }),
         el("div", { class: "agente-name", text: s.agente }),
