@@ -7,16 +7,28 @@ const TIME_BUDGET_MS = 32000;
 const REQUEST_TIMEOUT_MS = 12000;
 const CURSOR_KEY = "ghl_sync_cursor";
 const PAGE_LIMIT = 100;
-const CONTACT_LOOKUP_BATCH = 10;
+const CONTACT_LOOKUP_BATCH = 5;
+const MAX_RETRIES_429 = 4;
 
 const PIPELINE_ID = "oRjd1pUxOgNbzkdLBjWC";
 const FTD_STAGE_ID = "3796b590-4fa6-4ef9-9b27-4aca989f6fd3";
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 async function fetchWithTimeout(url: string, options: RequestInit): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    return await fetch(url, { ...options, signal: controller.signal });
+    for (let intento = 0; intento <= MAX_RETRIES_429; intento++) {
+      const res = await fetch(url, { ...options, signal: controller.signal });
+      if (res.status !== 429 || intento === MAX_RETRIES_429) return res;
+      const retryAfter = Number(res.headers.get("retry-after"));
+      const espera = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 1000 * 2 ** intento;
+      await sleep(espera);
+    }
+    throw new Error("unreachable");
   } finally {
     clearTimeout(timer);
   }
@@ -106,6 +118,7 @@ async function syncOportunidades(
       for (const res of resultados) {
         if (res) contactoAAgente.set(res.contactId, res.agente);
       }
+      if (i + CONTACT_LOOKUP_BATCH < opportunities.length) await sleep(300);
     }
 
     const rows: EventoRow[] = [];
