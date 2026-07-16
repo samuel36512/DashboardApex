@@ -41,17 +41,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: "desde/hasta deben ser fechas validas (YYYY-MM-DD)" });
   }
 
-  let query = supabase.from("eventos").select("agente, tipo, monto");
-  if (desde) query = query.gte("fecha", desde);
-  if (hasta) query = query.lte("fecha", `${hasta}T23:59:59.999Z`);
+  // Supabase/PostgREST limita cada consulta a un maximo de filas (tipicamente
+  // 1000), asi que con una tabla grande hay que paginar explicitamente para
+  // traer todo, si no los conteos quedan cortados.
+  const PAGE = 1000;
+  const allRows: { agente: string; tipo: string; monto: number | null }[] = [];
+  for (let offset = 0; ; offset += PAGE) {
+    let query = supabase.from("eventos").select("agente, tipo, monto").range(offset, offset + PAGE - 1);
+    if (desde) query = query.gte("fecha", desde);
+    if (hasta) query = query.lte("fecha", `${hasta}T23:59:59.999Z`);
 
-  const { data, error } = await query;
-  if (error) {
-    return res.status(500).json({ error: "Error leyendo los datos" });
+    const { data: page, error } = await query;
+    if (error) {
+      return res.status(500).json({ error: "Error leyendo los datos" });
+    }
+    allRows.push(...(page ?? []));
+    if (!page || page.length < PAGE) break;
   }
 
   const byAgent = new Map<string, AgentAgg>();
-  for (const row of data ?? []) {
+  for (const row of allRows) {
     if (!byAgent.has(row.agente)) {
       byAgent.set(row.agente, { leads: 0, registros: 0, ftds: 0, ventasUSD: 0 });
     }
