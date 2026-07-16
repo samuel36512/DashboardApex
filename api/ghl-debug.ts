@@ -1,10 +1,9 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { getSupabase } from "./_lib/supabase";
 
 const GHL_BASE = "https://services.leadconnectorhq.com";
 const GHL_VERSION = "2021-07-28";
-const PIPELINE_ID = "oRjd1pUxOgNbzkdLBjWC";
-const FTD_STAGE_ID = "3796b590-4fa6-4ef9-9b27-4aca989f6fd3";
-const HENRY_ID = "VeVKUZI50c8Fjvv2sHWI";
+const JHON_ID = "b8GjMwrGyLZnWd7S9PXT";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const secret = process.env.WEBHOOK_SECRET;
@@ -13,9 +12,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const token = process.env.GHL_API_TOKEN;
-  const locationId = process.env.GHL_LOCATION_ID;
-  if (!token || !locationId) {
-    return res.status(500).json({ error: "Faltan GHL_API_TOKEN o GHL_LOCATION_ID en Vercel" });
+  if (!token) {
+    return res.status(500).json({ error: "Falta GHL_API_TOKEN en Vercel" });
+  }
+
+  const supabase = getSupabase();
+  const { data: rows, error } = await supabase
+    .from("eventos")
+    .select("contacto_id")
+    .eq("agente", "Jhon Camacho")
+    .eq("tipo", "registro")
+    .limit(10);
+  if (error) {
+    return res.status(500).json({ error: error.message });
   }
 
   const headers = {
@@ -24,29 +33,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     Accept: "application/json",
   };
 
-  const todasParams = new URLSearchParams({
-    location_id: locationId,
-    pipeline_id: PIPELINE_ID,
-    assigned_to: HENRY_ID,
-    limit: "1",
-  });
-  const ftdParams = new URLSearchParams({
-    location_id: locationId,
-    pipeline_id: PIPELINE_ID,
-    pipeline_stage_id: FTD_STAGE_ID,
-    assigned_to: HENRY_ID,
-    limit: "1",
-  });
+  const muestras = await Promise.all(
+    (rows ?? []).map(async (row) => {
+      const r = await fetch(`${GHL_BASE}/contacts/${row.contacto_id}`, { headers });
+      const body: any = await r.json().catch(() => ({}));
+      const contact = body?.contact;
+      return {
+        contacto_id: row.contacto_id,
+        status: r.status,
+        nombre: contact?.contactName,
+        assignedTo: contact?.assignedTo,
+        esRealmenteDeJhon: contact?.assignedTo === JHON_ID,
+      };
+    })
+  );
 
-  const [todasRes, ftdRes] = await Promise.all([
-    fetch(`${GHL_BASE}/opportunities/search?${todasParams.toString()}`, { headers }),
-    fetch(`${GHL_BASE}/opportunities/search?${ftdParams.toString()}`, { headers }),
-  ]);
-  const todasBody: any = await todasRes.json().catch(() => ({ parseError: true }));
-  const ftdBody: any = await ftdRes.json().catch(() => ({ parseError: true }));
-
-  return res.status(200).json({
-    todasLasEtapas: { status: todasRes.status, total: todasBody?.meta?.total, url: todasParams.toString() },
-    soloFtdEfectuado: { status: ftdRes.status, total: ftdBody?.meta?.total, url: ftdParams.toString() },
-  });
+  return res.status(200).json({ jhonId: JHON_ID, muestras });
 }
