@@ -318,6 +318,28 @@
   .admin-badge-ok { font-size: 12px; color: var(--good); margin-left: auto; }
   .admin-email { font-size: 12px; color: var(--text-muted); margin-left: auto; }
   .admin-msg { font-size: 12px; color: var(--text-secondary); }
+
+  /* ---- Date filter ---- */
+  .filter-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+  .filter-pill {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-size: 12px;
+  }
+  .filter-pill:hover { border-color: var(--text-muted); }
+  .filter-pill.active {
+    background: var(--series-1);
+    border-color: var(--series-1);
+    color: #ffffff;
+  }
 </style>
 </head>
 <body>
@@ -417,6 +439,38 @@
     emailInput.focus();
   }
 
+  function fmtDate(d) {
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+
+  var DATE_PRESETS = [
+    { id: "todo", label: "Todo", range: function () { return { desde: null, hasta: null }; } },
+    { id: "hoy", label: "Hoy", range: function () { var t = fmtDate(new Date()); return { desde: t, hasta: t }; } },
+    {
+      id: "7dias",
+      label: "Últimos 7 días",
+      range: function () {
+        var hoy = new Date();
+        var hace7 = new Date();
+        hace7.setDate(hoy.getDate() - 6);
+        return { desde: fmtDate(hace7), hasta: fmtDate(hoy) };
+      },
+    },
+    {
+      id: "mes",
+      label: "Este mes",
+      range: function () {
+        var hoy = new Date();
+        var inicio = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+        return { desde: fmtDate(inicio), hasta: fmtDate(hoy) };
+      },
+    },
+  ];
+
+  var currentPreset = "todo";
+  var currentDesde = null;
+  var currentHasta = null;
+
   function renderShell(email) {
     app.innerHTML = "";
 
@@ -434,6 +488,24 @@
     ]);
     app.appendChild(header);
 
+    var filterRow = el("div", { class: "filter-row", id: "filter-row" });
+    DATE_PRESETS.forEach(function (preset) {
+      var btn = el("button", { class: "filter-pill" + (preset.id === currentPreset ? " active" : ""), text: preset.label });
+      btn.addEventListener("click", function () {
+        currentPreset = preset.id;
+        var range = preset.range();
+        currentDesde = range.desde;
+        currentHasta = range.hasta;
+        Array.prototype.forEach.call(filterRow.querySelectorAll(".filter-pill"), function (b) {
+          b.classList.remove("active");
+        });
+        btn.classList.add("active");
+        loadMetrics(true, currentAccessToken);
+      });
+      filterRow.appendChild(btn);
+    });
+    app.appendChild(filterRow);
+
     var content = el("div", { id: "content" });
     app.appendChild(content);
 
@@ -442,7 +514,7 @@
     ]));
 
     document.getElementById("refresh-btn").addEventListener("click", function () {
-      loadMetrics(true);
+      loadMetrics(true, currentAccessToken);
     });
     document.getElementById("logout-btn").addEventListener("click", function () {
       supabaseClient.auth.signOut().then(boot);
@@ -692,7 +764,12 @@
     if (refreshBtn) { refreshBtn.disabled = true; refreshBtn.textContent = "Actualizando…"; }
     if (manual) renderLoading();
 
-    fetch("/metrics", { headers: { Authorization: "Bearer " + accessToken } })
+    var qs = "";
+    if (currentDesde && currentHasta) {
+      qs = "?desde=" + encodeURIComponent(currentDesde) + "&hasta=" + encodeURIComponent(currentHasta);
+    }
+
+    fetch("/metrics" + qs, { headers: { Authorization: "Bearer " + accessToken } })
       .then(function (res) {
         if (res.status === 401) throw new Error("Tu sesión venció, volvé a iniciar sesión.");
         if (res.status === 403) throw new Error("Tu cuenta todavía no tiene acceso configurado. Pedile al director que te habilite.");

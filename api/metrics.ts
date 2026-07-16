@@ -35,7 +35,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(403).json({ error: "Tu cuenta no tiene un perfil asignado" });
   }
 
-  const { data, error } = await supabase.from("eventos").select("agente, tipo, monto");
+  const desde = typeof req.query.desde === "string" ? req.query.desde : "";
+  const hasta = typeof req.query.hasta === "string" ? req.query.hasta : "";
+  if ((desde && Number.isNaN(Date.parse(desde))) || (hasta && Number.isNaN(Date.parse(hasta)))) {
+    return res.status(400).json({ error: "desde/hasta deben ser fechas validas (YYYY-MM-DD)" });
+  }
+
+  let query = supabase.from("eventos").select("agente, tipo, monto");
+  if (desde) query = query.gte("fecha", desde);
+  if (hasta) query = query.lte("fecha", `${hasta}T23:59:59.999Z`);
+
+  const { data, error } = await query;
   if (error) {
     return res.status(500).json({ error: "Error leyendo los datos" });
   }
@@ -81,5 +91,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     metaVentasUSD: Number(process.env.META_VENTAS_USD ?? 2400),
     actualizado: new Date().toISOString(),
     rol,
+    filtro: { desde: desde || null, hasta: hasta || null },
   });
 }
