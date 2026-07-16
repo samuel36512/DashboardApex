@@ -93,7 +93,15 @@ async function syncByStage(
       contactosRevisados++;
       const agente = agentesById.get(o.assignedTo);
       if (!agente || !o.contactId) continue;
-      const fecha = o.lastStageChangeAt || o.updatedAt || o.createdAt || new Date().toISOString();
+      // Registro = fecha de creacion de la oportunidad (cuando entro a la
+      // etapa Registrado, la primera). FTD = fecha en que entro a esa etapa
+      // especifica. Si se usara lastStageChangeAt para registro, alguien que
+      // ya avanzo a FTD quedaria fechado con el cambio a FTD, no con cuando
+      // realmente se registro.
+      const fecha =
+        tipo === "registro"
+          ? o.createdAt || o.lastStageChangeAt || o.updatedAt || new Date().toISOString()
+          : o.lastStageChangeAt || o.updatedAt || o.createdAt || new Date().toISOString();
       rows.push({ contacto_id: o.contactId, agente, tipo, fecha });
     }
     if (rows.length > 0) {
