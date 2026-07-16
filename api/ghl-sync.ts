@@ -113,7 +113,7 @@ async function syncOportunidades(
         body: JSON.stringify({
           locationId,
           pageLimit: loteIds.length,
-          filters: [{ field: "id", operator: "in", value: loteIds }],
+          filters: [{ field: "id", operator: "contains_set", value: loteIds }],
         }),
       });
       if (!cr.ok) {
