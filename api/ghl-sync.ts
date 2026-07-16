@@ -7,6 +7,9 @@ const TIME_BUDGET_MS = 45000;
 const CURSOR_KEY = "ghl_sync_cursor";
 const PAGE_LIMIT = 100;
 
+const PIPELINE_ID = "oRjd1pUxOgNbzkdLBjWC";
+const FTD_STAGE_ID = "3796b590-4fa6-4ef9-9b27-4aca989f6fd3";
+
 interface EventoRow {
   contacto_id: string;
   agente: string;
@@ -14,10 +17,15 @@ interface EventoRow {
   fecha: string;
 }
 
+interface StageCursor {
+  startAfter?: number;
+  startAfterId?: string;
+}
+
 interface CursorState {
-  leads?: { startAfter?: number; startAfterId?: string };
-  registro?: { searchAfter?: [number, string] };
-  ftd?: { searchAfter?: [number, string] };
+  leads?: StageCursor;
+  registro?: StageCursor;
+  ftd?: StageCursor;
 }
 
 type Supabase = ReturnType<typeof getSupabase>;
@@ -26,54 +34,55 @@ function timeLeft(started: number): number {
   return TIME_BUDGET_MS - (Date.now() - started);
 }
 
-// Registro y FTD se buscan directamente por etiqueta (POST /contacts/search),
-// no por orden de creacion: un contacto puede haberse creado hace semanas y
-// recien hoy recibir la etiqueta, y ese caso se perdia con la paginacion
-// por fecha de alta.
-async function syncByTag(
-  tag: string,
+// Registro = cualquier oportunidad en el Pipeline principal, sin importar la
+// etapa actual (Registrado es la etapa de entrada: si avanzo a FTD Efectuado,
+// tambien paso por Registrado). FTD = oportunidades que llegaron especificamente
+// a la etapa "FTD Efectuado". Se usa el pipeline/etapa en vez de etiquetas porque
+// asi es como el director mide estos numeros en GHL.
+async function syncByStage(
   tipo: "registro" | "ftd",
+  stageId: string | null,
   headers: Record<string, string>,
   locationId: string,
   agentesById: Map<string, string>,
   supabase: Supabase,
   started: number,
-  cursor: { searchAfter?: [number, string] } | undefined
+  cursor: StageCursor | undefined
 ) {
-  let searchAfter = cursor?.searchAfter;
+  let startAfter = cursor?.startAfter;
+  let startAfterId = cursor?.startAfterId;
   let contactosRevisados = 0;
   let eventosGuardados = 0;
 
   while (timeLeft(started) > 5000) {
-    const body: Record<string, unknown> = {
-      locationId,
-      pageLimit: PAGE_LIMIT,
-      filters: [{ field: "tags", operator: "contains", value: tag }],
-      sort: [{ field: "dateUpdated", direction: "desc" }],
-    };
-    if (searchAfter) body.searchAfter = searchAfter;
-
-    const r = await fetch(`${GHL_BASE}/contacts/search`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
+    const params = new URLSearchParams({
+      location_id: locationId,
+      pipeline_id: PIPELINE_ID,
+      limit: String(PAGE_LIMIT),
     });
+    if (stageId) params.set("pipeline_stage_id", stageId);
+    if (startAfter !== undefined && startAfterId) {
+      params.set("startAfter", String(startAfter));
+      params.set("startAfterId", startAfterId);
+    }
+
+    const r = await fetch(`${GHL_BASE}/opportunities/search?${params.toString()}`, { headers });
     if (!r.ok) {
-      throw new Error(`GHL /contacts/search (${tag}) respondio ${r.status}`);
+      throw new Error(`GHL /opportunities/search (${tipo}) respondio ${r.status}`);
     }
     const data: any = await r.json();
-    const contacts: any[] = Array.isArray(data?.contacts) ? data.contacts : [];
-    if (contacts.length === 0) {
+    const opportunities: any[] = Array.isArray(data?.opportunities) ? data.opportunities : [];
+    if (opportunities.length === 0) {
       return { done: true, cursor: undefined, contactosRevisados, eventosGuardados };
     }
 
     const rows: EventoRow[] = [];
-    for (const c of contacts) {
+    for (const o of opportunities) {
       contactosRevisados++;
-      const agente = agentesById.get(c.assignedTo);
-      if (!agente) continue;
-      const fecha = c.dateUpdated || c.dateAdded || new Date().toISOString();
-      rows.push({ contacto_id: c.id, agente, tipo, fecha });
+      const agente = agentesById.get(o.assignedTo);
+      if (!agente || !o.contactId) continue;
+      const fecha = o.lastStageChangeAt || o.updatedAt || o.createdAt || new Date().toISOString();
+      rows.push({ contacto_id: o.contactId, agente, tipo, fecha });
     }
     if (rows.length > 0) {
       const { error } = await supabase.from("eventos").upsert(rows, { onConflict: "contacto_id,tipo" });
@@ -81,14 +90,15 @@ async function syncByTag(
       eventosGuardados += rows.length;
     }
 
-    searchAfter = contacts[contacts.length - 1].searchAfter;
-
-    if (contacts.length < PAGE_LIMIT) {
+    const meta = data?.meta;
+    if (!meta?.nextPage || opportunities.length < PAGE_LIMIT) {
       return { done: true, cursor: undefined, contactosRevisados, eventosGuardados };
     }
+    startAfter = meta.startAfter;
+    startAfterId = meta.startAfterId;
   }
 
-  return { done: false, cursor: { searchAfter }, contactosRevisados, eventosGuardados };
+  return { done: false, cursor: { startAfter, startAfterId }, contactosRevisados, eventosGuardados };
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -132,9 +142,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const nextCursor: CursorState = {};
 
   try {
-    const registroResult = await syncByTag(
-      "registrado",
+    const registroResult = await syncByStage(
       "registro",
+      null,
       headers,
       locationId,
       agentesById,
@@ -143,15 +153,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       cursorState.registro
     );
     resumen.registro = {
-      contactosRevisados: registroResult.contactosRevisados,
+      revisadas: registroResult.contactosRevisados,
       eventosGuardados: registroResult.eventosGuardados,
       completo: registroResult.done,
     };
     if (!registroResult.done) nextCursor.registro = registroResult.cursor;
 
-    const ftdResult = await syncByTag(
-      "ftd-efectuado",
+    const ftdResult = await syncByStage(
       "ftd",
+      FTD_STAGE_ID,
       headers,
       locationId,
       agentesById,
@@ -160,7 +170,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       cursorState.ftd
     );
     resumen.ftd = {
-      contactosRevisados: ftdResult.contactosRevisados,
+      revisadas: ftdResult.contactosRevisados,
       eventosGuardados: ftdResult.eventosGuardados,
       completo: ftdResult.done,
     };
