@@ -7,7 +7,7 @@ const TIME_BUDGET_MS = 32000;
 const REQUEST_TIMEOUT_MS = 12000;
 const CURSOR_KEY = "ghl_sync_cursor";
 const PAGE_LIMIT = 100;
-const CONTACT_LOOKUP_BATCH = 5;
+const CONTACT_LOOKUP_BATCH = 100;
 const MAX_RETRIES_429 = 4;
 
 const PIPELINE_ID = "oRjd1pUxOgNbzkdLBjWC";
@@ -101,24 +101,32 @@ async function syncOportunidades(
       return { done: true, cursor: undefined, revisadas, eventosGuardados };
     }
 
-    // Dueno actual en vivo, en lotes chicos para no saturar.
+    // Dueno actual en vivo, agrupado: un solo pedido con hasta 100 ids en vez
+    // de un GET por contacto (mucho menos propenso al limite de velocidad).
+    const idsUnicos = Array.from(new Set(opportunities.map((o) => o.contactId).filter(Boolean)));
     const contactoAAgente = new Map<string, string | null>();
-    for (let i = 0; i < opportunities.length; i += CONTACT_LOOKUP_BATCH) {
-      const lote = opportunities.slice(i, i + CONTACT_LOOKUP_BATCH);
-      const resultados = await Promise.all(
-        lote.map(async (o) => {
-          if (!o.contactId) return null;
-          const cr = await fetchWithTimeout(`${GHL_BASE}/contacts/${o.contactId}`, { headers });
-          if (!cr.ok) return null;
-          const cbody: any = await cr.json().catch(() => null);
-          const assignedTo = cbody?.contact?.assignedTo as string | undefined;
-          return { contactId: o.contactId as string, agente: assignedTo ? agentesById.get(assignedTo) ?? null : null };
-        })
-      );
-      for (const res of resultados) {
-        if (res) contactoAAgente.set(res.contactId, res.agente);
+    for (let i = 0; i < idsUnicos.length; i += CONTACT_LOOKUP_BATCH) {
+      const loteIds = idsUnicos.slice(i, i + CONTACT_LOOKUP_BATCH);
+      const cr = await fetchWithTimeout(`${GHL_BASE}/contacts/search`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          locationId,
+          pageLimit: loteIds.length,
+          filters: [{ field: "id", operator: "in", value: loteIds }],
+        }),
+      });
+      if (!cr.ok) {
+        const detalle = await cr.text().catch(() => "");
+        throw new Error(`GHL /contacts/search (busqueda por id) respondio ${cr.status}: ${detalle.slice(0, 300)}`);
       }
-      if (i + CONTACT_LOOKUP_BATCH < opportunities.length) await sleep(300);
+      const cbody: any = await cr.json().catch(() => null);
+      const contactos: any[] = Array.isArray(cbody?.contacts) ? cbody.contacts : [];
+      for (const c of contactos) {
+        const agente = c.assignedTo ? agentesById.get(c.assignedTo) ?? null : null;
+        contactoAAgente.set(c.id, agente);
+      }
+      if (i + CONTACT_LOOKUP_BATCH < idsUnicos.length) await sleep(200);
     }
 
     const rows: EventoRow[] = [];
