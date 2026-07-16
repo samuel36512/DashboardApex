@@ -83,26 +83,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!page || page.length < PAGE) break;
   }
 
-  // La ultima conversion (registro/ftd) se calcula SIEMPRE sin el filtro de
-  // fecha activo, para que la alerta de inactividad tenga sentido sin
-  // importar que vista de fechas este mirando el director. Se excluyen las
-  // filas "baseline-*" (el historico sembrado a mano): su fecha es solo el
-  // momento en que se sembraron, no una actividad real, y contarla como tal
-  // hacia que todos los agentes salieran con la misma fecha vieja.
-  const ultimaConversion = new Map<string, string>();
+  // El historial reciente de conversion (registro/ftd) se calcula SIEMPRE sin
+  // el filtro de fecha activo, para que la alerta de inactividad tenga
+  // sentido sin importar que vista de fechas este mirando el director. Se
+  // manda la lista completa de fechas (no solo la ultima) porque la alerta
+  // necesita comprobar dias puntuales (hoy, ayer, hace 3 dias...) y un
+  // agente puede haber tenido actividad en varios de esos dias a la vez -
+  // quedarse solo con la mas reciente esconde las demas. Se excluyen las
+  // filas "baseline-*" (el historico sembrado a mano, sin fecha real) y se
+  // limita a la ultima semana para no mandar de mas.
+  const unaSemanaAtras = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const conversionesRecientes = new Map<string, string[]>();
   for (let offset = 0; ; offset += PAGE) {
     const { data: page, error } = await supabase
       .from("eventos")
       .select("agente, fecha")
       .in("tipo", ["registro", "ftd"])
       .not("contacto_id", "like", "baseline-%")
+      .gte("fecha", unaSemanaAtras)
       .range(offset, offset + PAGE - 1);
     if (error) {
-      return res.status(500).json({ error: "Error leyendo ultima actividad" });
+      return res.status(500).json({ error: "Error leyendo actividad reciente" });
     }
     for (const row of page ?? []) {
-      const actual = ultimaConversion.get(row.agente);
-      if (!actual || row.fecha > actual) ultimaConversion.set(row.agente, row.fecha);
+      if (!conversionesRecientes.has(row.agente)) conversionesRecientes.set(row.agente, []);
+      conversionesRecientes.get(row.agente)!.push(row.fecha);
     }
     if (!page || page.length < PAGE) break;
   }
@@ -116,7 +121,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       registros: a.registros,
       ftds: a.ftds,
       ventasUSD: a.ventasUSD,
-      ultimaConversion: ultimaConversion.get(agente) || null,
+      conversionesRecientes: conversionesRecientes.get(agente) || [],
       conversion: {
         leadToRegistro: pct(a.registros, a.leads),
         registroToFtd: pct(a.ftds, a.registros),

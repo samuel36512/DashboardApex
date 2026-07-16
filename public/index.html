@@ -1055,12 +1055,15 @@
 
   // Compara contra un dia calendario puntual (no acumulado): offset=0 es
   // hoy, offset=1 es ayer, offset=3 es exactamente hace 3 dias, etc.
-  function activoEseDia(fechaIso, offsetDias) {
-    if (!fechaIso) return false;
-    var f = new Date(fechaIso);
+  // Revisa TODAS las fechas recientes del agente, no solo la mas nueva, para
+  // no perder actividad de otros dias cuando tambien hubo algo mas reciente.
+  function tuvoActividadEseDia(fechas, offsetDias) {
     var objetivo = new Date();
     objetivo.setDate(objetivo.getDate() - offsetDias);
-    return f.getFullYear() === objetivo.getFullYear() && f.getMonth() === objetivo.getMonth() && f.getDate() === objetivo.getDate();
+    return (fechas || []).some(function (fechaIso) {
+      var f = new Date(fechaIso);
+      return f.getFullYear() === objetivo.getFullYear() && f.getMonth() === objetivo.getMonth() && f.getDate() === objetivo.getDate();
+    });
   }
 
   function renderInactividadView(data) {
@@ -1068,8 +1071,10 @@
     var agentes = (data.agentes || []).slice();
 
     var withStatus = agentes.map(function (a) {
-      var activo = activoEseDia(a.ultimaConversion, preset.offset);
-      return { agente: a.agente, alerta: !activo, fechaOrden: a.ultimaConversion || "" };
+      var fechas = a.conversionesRecientes || [];
+      var activo = tuvoActividadEseDia(fechas, preset.offset);
+      var masReciente = fechas.length ? fechas.slice().sort().pop() : "";
+      return { agente: a.agente, alerta: !activo, fechaOrden: masReciente };
     });
     withStatus.sort(function (a, b) {
       if (a.alerta !== b.alerta) return a.alerta ? -1 : 1;
