@@ -88,6 +88,7 @@ async function cargarOportunidadesPipeline(
     const params = new URLSearchParams({
       location_id: locationId,
       pipeline_id: PIPELINE_ID,
+      status: "all",
       limit: String(PAGE_LIMIT),
     });
     if (startAfter !== undefined && startAfterId) {

@@ -35,6 +35,7 @@ async function compararAgente(
       location_id: locationId,
       pipeline_id: PIPELINE_ID,
       assigned_to: agenteRow.ghl_user_id,
+      status: "all",
       limit: String(PAGE_LIMIT),
     });
     if (tipo === "ftd") params.set("pipeline_stage_id", FTD_STAGE_ID);
@@ -153,6 +154,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       location_id: locationId,
       pipeline_id: PIPELINE_ID,
       contact_id: c.id,
+      status: "all",
       limit: "20",
     });
     const oppRes = await fetch(`${GHL_BASE}/opportunities/search?${oppParams.toString()}`, { headers });
