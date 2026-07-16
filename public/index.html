@@ -6,51 +6,19 @@
 <title>Conversión de Ventas — Dashboard</title>
 <style>
   :root {
-    color-scheme: light;
-    --surface-1: #fcfcfb;
-    --page: #f9f9f7;
-    --text-primary: #0b0b0b;
-    --text-secondary: #52514e;
-    --text-muted: #898781;
-    --gridline: #e1e0d9;
-    --baseline: #c3c2b7;
-    --border: rgba(11,11,11,0.10);
-    --series-1: #2a78d6;
-    --series-1-soft: #cde2fb;
-    --good: #0ca30c;
-    --warning: #fab219;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root:where(:not([data-theme="light"])) {
-      color-scheme: dark;
-      --surface-1: #1a1a19;
-      --page: #0d0d0d;
-      --text-primary: #ffffff;
-      --text-secondary: #c3c2b7;
-      --text-muted: #898781;
-      --gridline: #2c2c2a;
-      --baseline: #383835;
-      --border: rgba(255,255,255,0.10);
-      --series-1: #3987e5;
-      --series-1-soft: #184f95;
-      --good: #0ca30c;
-      --warning: #fab219;
-    }
-  }
-  :root[data-theme="dark"] {
     color-scheme: dark;
-    --surface-1: #1a1a19;
-    --page: #0d0d0d;
-    --text-primary: #ffffff;
-    --text-secondary: #c3c2b7;
-    --text-muted: #898781;
-    --gridline: #2c2c2a;
-    --baseline: #383835;
-    --border: rgba(255,255,255,0.10);
-    --series-1: #3987e5;
-    --series-1-soft: #184f95;
-    --good: #0ca30c;
-    --warning: #fab219;
+    --surface-1: #171510;
+    --page: #0a0908;
+    --text-primary: #f6f1e6;
+    --text-secondary: #beb49b;
+    --text-muted: #837a63;
+    --gridline: #2a271e;
+    --baseline: #3a3527;
+    --border: rgba(224,187,102,0.16);
+    --series-1: #dcae53;
+    --series-1-soft: #3d3115;
+    --good: #4caf6d;
+    --warning: #e0a83c;
   }
 
   * { box-sizing: border-box; }
@@ -73,6 +41,31 @@
     justify-content: space-between;
     gap: 12px;
     margin-bottom: 24px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .brand-mark {
+    width: 9px;
+    height: 9px;
+    flex: none;
+    background: var(--series-1);
+    transform: rotate(45deg);
+    border-radius: 2px;
+  }
+  .brand-name {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+  }
+  .brand-name b {
+    color: var(--series-1);
+    font-weight: 700;
   }
   h1 {
     font-size: 22px;
@@ -107,7 +100,7 @@
     align-items: center;
     gap: 6px;
   }
-  .btn:hover { border-color: var(--text-muted); }
+  .btn:hover { border-color: var(--series-1); }
   .btn:disabled { opacity: 0.5; cursor: default; }
 
   .card {
@@ -284,6 +277,12 @@
     color: var(--text-primary);
     margin-top: 10px;
   }
+  .login input:focus,
+  .admin-row input:focus {
+    outline: none;
+    border-color: var(--series-1);
+    box-shadow: 0 0 0 3px var(--series-1-soft);
+  }
   .login .error {
     color: #d03b3b;
     font-size: 12px;
@@ -336,11 +335,12 @@
     padding: 6px 14px;
     font-size: 12px;
   }
-  .filter-pill:hover { border-color: var(--text-muted); }
+  .filter-pill:hover { border-color: var(--series-1); }
   .filter-pill.active {
     background: var(--series-1);
     border-color: var(--series-1);
-    color: #ffffff;
+    color: #14110a;
+    font-weight: 600;
   }
 </style>
 </head>
@@ -406,6 +406,10 @@
   function renderLogin(errorMsg) {
     app.innerHTML = "";
     var panel = el("div", { class: "card login" }, [
+      el("div", { class: "brand" }, [
+        el("span", { class: "brand-mark" }),
+        el("span", { class: "brand-name" }, [document.createTextNode("APEX "), el("b", { text: "PRINCIPAL" })]),
+      ]),
       el("h2", { text: "Conversión de Ventas" }),
       el("p", { text: "Ingresá con el email y la contraseña que te dieron." }),
     ]);
@@ -478,6 +482,10 @@
 
     var header = el("header", {}, [
       el("div", {}, [
+        el("div", { class: "brand" }, [
+          el("span", { class: "brand-mark" }),
+          el("span", { class: "brand-name" }, [document.createTextNode("APEX "), el("b", { text: "PRINCIPAL" })]),
+        ]),
         el("h1", { text: "Conversión de Ventas" }),
         el("p", { class: "subtitle", text: "Leads → Registro EXOPTION → FTD → Venta de membresía, por agente" }),
       ]),
