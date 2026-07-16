@@ -485,13 +485,17 @@
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: var(--good);
+    background: var(--text-muted);
     flex: none;
   }
-  .inact-row.alert .inact-dot { background: var(--danger); }
+  .inact-row.ftd .inact-dot { background: var(--good); }
+  .inact-row.registro .inact-dot { background: var(--warning); }
+  .inact-row.ninguno .inact-dot { background: var(--danger); }
   .inact-row .agente-name { flex: 1; font-size: 13px; }
-  .inact-row .inact-status { font-size: 12px; color: var(--text-muted); text-align: right; }
-  .inact-row.alert .inact-status { color: var(--danger); font-weight: 600; }
+  .inact-row .inact-status { font-size: 12px; color: var(--text-muted); text-align: right; font-weight: 600; }
+  .inact-row.ftd .inact-status { color: var(--good); }
+  .inact-row.registro .inact-status { color: var(--warning); }
+  .inact-row.ninguno .inact-status { color: var(--danger); }
 </style>
 </head>
 <body>
@@ -518,11 +522,12 @@
   var adminPanelOpen = false;
 
   var INACT_PRESETS = [
-    { id: "hoy", label: "Hoy", offset: 0, ventana: "hoy" },
-    { id: "ayer", label: "Ayer", offset: 1, ventana: "ayer" },
-    { id: "3d", label: "3 días", offset: 3, ventana: "hace 3 días" },
-    { id: "4d", label: "4 días", offset: 4, ventana: "hace 4 días" },
-    { id: "5d", label: "5 días", offset: 5, ventana: "hace 5 días" },
+    { id: "8h", label: "8 horas", tipo: "horas", horas: 8, ventana: "en las últimas 8 horas" },
+    { id: "hoy", label: "Hoy", tipo: "dia", offset: 0, ventana: "hoy" },
+    { id: "ayer", label: "Ayer", tipo: "dia", offset: 1, ventana: "ayer" },
+    { id: "3d", label: "3 días", tipo: "dia", offset: 3, ventana: "hace 3 días" },
+    { id: "4d", label: "4 días", tipo: "dia", offset: 4, ventana: "hace 4 días" },
+    { id: "5d", label: "5 días", tipo: "dia", offset: 5, ventana: "hace 5 días" },
   ];
   var currentInactPreset = "hoy";
 
@@ -622,7 +627,7 @@
     {
       view: "inactividad",
       label: "Alerta de inactividad",
-      desc: "Agentes sin un registro o FTD hoy (00:00 a 23:59).",
+      desc: "Quién hizo FTD, quién solo registró y quién no tuvo actividad.",
     },
   ];
 
@@ -1052,31 +1057,40 @@
       "Actualizado " + new Date(data.actualizado || Date.now()).toLocaleTimeString("es-419", { hour: "2-digit", minute: "2-digit" });
   }
 
-  // Compara contra un dia calendario puntual (no acumulado): offset=0 es
-  // hoy, offset=1 es ayer, offset=3 es exactamente hace 3 dias, etc.
-  // Revisa TODAS las fechas recientes del agente, no solo la mas nueva, para
-  // no perder actividad de otros dias cuando tambien hubo algo mas reciente.
-  function tuvoActividadEseDia(fechas, offsetDias) {
+  // Filtra los eventos recientes del agente segun el preset elegido: "dia"
+  // compara contra un dia calendario puntual (offset=0 hoy, 1 ayer, etc, no
+  // acumulado), "horas" es una ventana movil desde ahora (ej. ultimas 8h).
+  function eventosEnVentana(eventos, preset) {
+    if (preset.tipo === "horas") {
+      var limite = Date.now() - preset.horas * 60 * 60 * 1000;
+      return (eventos || []).filter(function (e) { return new Date(e.fecha).getTime() >= limite; });
+    }
     var objetivo = new Date();
-    objetivo.setDate(objetivo.getDate() - offsetDias);
-    return (fechas || []).some(function (fechaIso) {
-      var f = new Date(fechaIso);
+    objetivo.setDate(objetivo.getDate() - preset.offset);
+    return (eventos || []).filter(function (e) {
+      var f = new Date(e.fecha);
       return f.getFullYear() === objetivo.getFullYear() && f.getMonth() === objetivo.getMonth() && f.getDate() === objetivo.getDate();
     });
   }
+
+  var ESTADO_ORDEN = { ninguno: 0, registro: 1, ftd: 2 };
+  var ESTADO_TEXTO = { ftd: "Hizo FTD", registro: "Solo hizo registro", ninguno: "Sin actividad de registros ni FTD" };
 
   function renderInactividadView(data) {
     var preset = INACT_PRESETS.filter(function (p) { return p.id === currentInactPreset; })[0] || INACT_PRESETS[0];
     var agentes = (data.agentes || []).slice();
 
     var withStatus = agentes.map(function (a) {
-      var fechas = a.conversionesRecientes || [];
-      var activo = tuvoActividadEseDia(fechas, preset.offset);
-      var masReciente = fechas.length ? fechas.slice().sort().pop() : "";
-      return { agente: a.agente, alerta: !activo, fechaOrden: masReciente };
+      var eventos = eventosEnVentana(a.conversionesRecientes || [], preset);
+      var tieneFtd = eventos.some(function (e) { return e.tipo === "ftd"; });
+      var tieneRegistro = eventos.some(function (e) { return e.tipo === "registro"; });
+      var estado = tieneFtd ? "ftd" : (tieneRegistro ? "registro" : "ninguno");
+      var todasFechas = (a.conversionesRecientes || []).map(function (e) { return e.fecha; });
+      var masReciente = todasFechas.length ? todasFechas.slice().sort().pop() : "";
+      return { agente: a.agente, estado: estado, fechaOrden: masReciente };
     });
     withStatus.sort(function (a, b) {
-      if (a.alerta !== b.alerta) return a.alerta ? -1 : 1;
+      if (ESTADO_ORDEN[a.estado] !== ESTADO_ORDEN[b.estado]) return ESTADO_ORDEN[a.estado] - ESTADO_ORDEN[b.estado];
       return a.fechaOrden.localeCompare(b.fechaOrden);
     });
 
@@ -1097,17 +1111,16 @@
     card.appendChild(el("div", { class: "section-title", text: "Alerta de inactividad" }));
     card.appendChild(el("div", {
       class: "section-desc",
-      text: "Verde: tuvo un registro o FTD " + preset.ventana + ". Rojo: no.",
+      text: "Verde: hizo FTD " + preset.ventana + ". Naranja: solo hizo registro. Rojo: sin registro ni FTD.",
     }));
     if (withStatus.length === 0) {
       card.appendChild(el("div", { class: "section-desc", text: "Todavía no hay agentes para revisar." }));
     }
     withStatus.forEach(function (s) {
-      var estado = (s.alerta ? "Sin FTD ni registro " : "Hizo FTD o registro ") + preset.ventana;
-      card.appendChild(el("div", { class: "inact-row" + (s.alerta ? " alert" : "") }, [
+      card.appendChild(el("div", { class: "inact-row " + s.estado }, [
         el("div", { class: "inact-dot" }),
         el("div", { class: "agente-name", text: s.agente }),
-        el("div", { class: "inact-status", text: estado }),
+        el("div", { class: "inact-status", text: ESTADO_TEXTO[s.estado] }),
       ]));
     });
     content.appendChild(el("section", {}, [card]));

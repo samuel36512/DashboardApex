@@ -93,11 +93,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // filas "baseline-*" (el historico sembrado a mano, sin fecha real) y se
   // limita a la ultima semana para no mandar de mas.
   const unaSemanaAtras = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-  const conversionesRecientes = new Map<string, string[]>();
+  const conversionesRecientes = new Map<string, { fecha: string; tipo: "registro" | "ftd" }[]>();
   for (let offset = 0; ; offset += PAGE) {
     const { data: page, error } = await supabase
       .from("eventos")
-      .select("agente, fecha")
+      .select("agente, fecha, tipo")
       .in("tipo", ["registro", "ftd"])
       .not("contacto_id", "like", "baseline-%")
       .gte("fecha", unaSemanaAtras)
@@ -107,7 +107,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     for (const row of page ?? []) {
       if (!conversionesRecientes.has(row.agente)) conversionesRecientes.set(row.agente, []);
-      conversionesRecientes.get(row.agente)!.push(row.fecha);
+      conversionesRecientes.get(row.agente)!.push({ fecha: row.fecha, tipo: row.tipo as "registro" | "ftd" });
     }
     if (!page || page.length < PAGE) break;
   }
