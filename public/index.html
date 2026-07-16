@@ -517,6 +517,15 @@
   var currentView = "welcome";
   var adminPanelOpen = false;
 
+  var INACT_PRESETS = [
+    { id: "hoy", label: "Hoy", dias: 1, ventana: "hoy" },
+    { id: "ayer", label: "Ayer", dias: 2, ventana: "los últimos 2 días" },
+    { id: "3d", label: "3 días", dias: 3, ventana: "los últimos 3 días" },
+    { id: "4d", label: "4 días", dias: 4, ventana: "los últimos 4 días" },
+    { id: "5d", label: "5 días", dias: 5, ventana: "los últimos 5 días" },
+  ];
+  var currentInactPreset = "hoy";
+
   var KNOWN_EMAILS = {
     "Ana Sánchez": "92anasp@gmail.com",
     "Andry Camacho": "juliana1611sanchez@gmail.com",
@@ -664,6 +673,8 @@
       var range = preset.range();
       currentDesde = range.desde;
       currentHasta = range.hasta;
+    } else if (view === "inactividad") {
+      currentInactPreset = "hoy";
     }
     renderShell();
     renderLoading();
@@ -1042,43 +1053,66 @@
       "Actualizado " + new Date(data.actualizado || Date.now()).toLocaleTimeString("es-419", { hour: "2-digit", minute: "2-digit" });
   }
 
-  function esHoy(fechaIso) {
-    var f = new Date(fechaIso);
-    var hoy = new Date();
-    return f.getFullYear() === hoy.getFullYear() && f.getMonth() === hoy.getMonth() && f.getDate() === hoy.getDate();
+  // Inicio (00:00 local) del dia que quedo "dias" atras contando hoy como
+  // el primero: dias=1 -> hoy, dias=2 -> desde ayer, dias=3 -> desde
+  // anteayer, etc.
+  function inicioDiaHace(dias) {
+    var d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - (dias - 1));
+    return d;
+  }
+
+  function activoEnVentana(fechaIso, dias) {
+    if (!fechaIso) return false;
+    return new Date(fechaIso).getTime() >= inicioDiaHace(dias).getTime();
   }
 
   function renderInactividadView(data) {
+    var preset = INACT_PRESETS.filter(function (p) { return p.id === currentInactPreset; })[0] || INACT_PRESETS[0];
     var agentes = (data.agentes || []).slice();
 
     var withStatus = agentes.map(function (a) {
-      var activoHoy = !!a.ultimaConversion && esHoy(a.ultimaConversion);
-      return { agente: a.agente, alerta: !activoHoy, fechaOrden: a.ultimaConversion || "" };
+      var activo = activoEnVentana(a.ultimaConversion, preset.dias);
+      return { agente: a.agente, alerta: !activo, fechaOrden: a.ultimaConversion || "" };
     });
     withStatus.sort(function (a, b) {
       if (a.alerta !== b.alerta) return a.alerta ? -1 : 1;
       return a.fechaOrden.localeCompare(b.fechaOrden);
     });
 
+    var content = el("div");
+
+    var filterRow = el("div", { class: "filter-row" });
+    INACT_PRESETS.forEach(function (p) {
+      var btn = el("button", { class: "filter-pill" + (p.id === currentInactPreset ? " active" : ""), text: p.label });
+      btn.addEventListener("click", function () {
+        currentInactPreset = p.id;
+        renderInactividadView(data);
+      });
+      filterRow.appendChild(btn);
+    });
+    content.appendChild(filterRow);
+
     var card = el("div", { class: "card" });
     card.appendChild(el("div", { class: "section-title", text: "Alerta de inactividad" }));
     card.appendChild(el("div", {
       class: "section-desc",
-      text: "Verde: tuvo un registro o FTD hoy (00:00 a 23:59). Rojo: no.",
+      text: "Verde: tuvo un registro o FTD en " + preset.ventana + ". Rojo: no.",
     }));
     if (withStatus.length === 0) {
       card.appendChild(el("div", { class: "section-desc", text: "Todavía no hay agentes para revisar." }));
     }
     withStatus.forEach(function (s) {
-      var estado = s.alerta ? "Sin FTD ni registro hoy" : "Hizo FTD o registro hoy";
+      var estado = s.alerta ? "Sin FTD ni registro" : "Hizo FTD o registro";
       card.appendChild(el("div", { class: "inact-row" + (s.alerta ? " alert" : "") }, [
         el("div", { class: "inact-dot" }),
         el("div", { class: "agente-name", text: s.agente }),
         el("div", { class: "inact-status", text: estado }),
       ]));
     });
+    content.appendChild(el("section", {}, [card]));
 
-    var content = el("div", {}, [el("section", {}, [card])]);
     renderContentState(content);
     document.getElementById("updated-label").textContent =
       "Actualizado " + new Date(data.actualizado || Date.now()).toLocaleTimeString("es-419", { hour: "2-digit", minute: "2-digit" });
