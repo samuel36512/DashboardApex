@@ -21,8 +21,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .from("eventos")
     .select("contacto_id")
     .eq("agente", "Jhon Camacho")
-    .eq("tipo", "registro")
-    .limit(10);
+    .eq("tipo", "registro");
   if (error) {
     return res.status(500).json({ error: error.message });
   }
@@ -33,20 +32,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     Accept: "application/json",
   };
 
-  const muestras = await Promise.all(
-    (rows ?? []).map(async (row) => {
-      const r = await fetch(`${GHL_BASE}/contacts/${row.contacto_id}`, { headers });
-      const body: any = await r.json().catch(() => ({}));
-      const contact = body?.contact;
-      return {
-        contacto_id: row.contacto_id,
-        status: r.status,
-        nombre: contact?.contactName,
-        assignedTo: contact?.assignedTo,
-        esRealmenteDeJhon: contact?.assignedTo === JHON_ID,
-      };
-    })
-  );
+  const todos = rows ?? [];
+  const resultados: any[] = [];
+  const BATCH = 10;
+  for (let i = 0; i < todos.length; i += BATCH) {
+    const lote = todos.slice(i, i + BATCH);
+    const resLote = await Promise.all(
+      lote.map(async (row) => {
+        const r = await fetch(`${GHL_BASE}/contacts/${row.contacto_id}`, { headers });
+        const body: any = await r.json().catch(() => ({}));
+        const contact = body?.contact;
+        return {
+          contacto_id: row.contacto_id,
+          nombre: contact?.contactName,
+          assignedTo: contact?.assignedTo,
+          esDeJhon: contact?.assignedTo === JHON_ID,
+        };
+      })
+    );
+    resultados.push(...resLote);
+  }
 
-  return res.status(200).json({ jhonId: JHON_ID, muestras });
+  const deJhon = resultados.filter((r) => r.esDeJhon).length;
+  const deOtro = resultados.filter((r) => !r.esDeJhon);
+
+  return res.status(200).json({
+    totalContactosEnDB: todos.length,
+    confirmadosDeJhon: deJhon,
+    noSonDeJhon: deOtro.length,
+    ejemplosQueNoSonDeJhon: deOtro.slice(0, 15),
+  });
 }

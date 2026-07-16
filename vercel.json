@@ -5,6 +5,6 @@
   ],
   "functions": {
     "api/ghl-sync.ts": { "maxDuration": 40 },
-    "api/ghl-debug.ts": { "maxDuration": 30 }
+    "api/ghl-debug.ts": { "maxDuration": 45 }
   }
 }
