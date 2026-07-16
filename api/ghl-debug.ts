@@ -2,8 +2,6 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 const GHL_BASE = "https://services.leadconnectorhq.com";
 const GHL_VERSION = "2021-07-28";
-const PIPELINE_ID = "oRjd1pUxOgNbzkdLBjWC";
-const REGISTRADO_STAGE = "09b221aa-9791-4f05-8869-1b4ac8c86e06";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const secret = process.env.WEBHOOK_SECRET;
@@ -21,21 +19,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     Authorization: `Bearer ${token}`,
     Version: GHL_VERSION,
     Accept: "application/json",
+    "Content-Type": "application/json",
   };
 
-  const params = new URLSearchParams({
-    location_id: locationId,
-    pipeline_id: PIPELINE_ID,
-    pipeline_stage_id: REGISTRADO_STAGE,
-    limit: "5",
-  });
+  // Henry Andres Correa, para probar
+  const testUserId = "VeVKUZI50c8Fjvv2sHWI";
 
-  const r = await fetch(`${GHL_BASE}/opportunities/search?${params.toString()}`, { headers });
+  const searchBody = {
+    locationId,
+    pageLimit: 5,
+    filters: [{ field: "assignedTo", operator: "eq", value: testUserId }],
+    sort: [{ field: "dateAdded", direction: "desc" }],
+  };
+
+  const r = await fetch(`${GHL_BASE}/contacts/search`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(searchBody),
+  });
   const body = await r.json().catch(() => ({ parseError: true }));
 
   return res.status(200).json({
-    intento: "GET /opportunities/search filtrado por pipeline+stage",
-    urlUsada: `${GHL_BASE}/opportunities/search?${params.toString()}`,
+    intento: "POST /contacts/search filtrado por assignedTo",
+    requestEnviado: searchBody,
     status: r.status,
     respuesta: body,
   });
