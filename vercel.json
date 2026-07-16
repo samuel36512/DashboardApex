@@ -4,7 +4,7 @@
     { "source": "/metrics", "destination": "/api/metrics" }
   ],
   "functions": {
-    "api/ghl-sync.ts": { "maxDuration": 60 },
+    "api/ghl-sync.ts": { "maxDuration": 40 },
     "api/ghl-debug.ts": { "maxDuration": 30 }
   }
 }

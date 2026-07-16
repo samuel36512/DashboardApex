@@ -3,9 +3,20 @@ import { getSupabase } from "./_lib/supabase";
 
 const GHL_BASE = "https://services.leadconnectorhq.com";
 const GHL_VERSION = "2021-07-28";
-const TIME_BUDGET_MS = 45000;
+const TIME_BUDGET_MS = 20000;
+const REQUEST_TIMEOUT_MS = 12000;
 const CURSOR_KEY = "ghl_sync_cursor";
 const PAGE_LIMIT = 100;
+
+async function fetchWithTimeout(url: string, options: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 const PIPELINE_ID = "oRjd1pUxOgNbzkdLBjWC";
 const FTD_STAGE_ID = "3796b590-4fa6-4ef9-9b27-4aca989f6fd3";
@@ -69,7 +80,7 @@ async function syncByStage(
       params.set("startAfterId", startAfterId);
     }
 
-    const r = await fetch(`${GHL_BASE}/opportunities/search?${params.toString()}`, { headers });
+    const r = await fetchWithTimeout(`${GHL_BASE}/opportunities/search?${params.toString()}`, { headers });
     if (!r.ok) throw new Error(`GHL /opportunities/search (${tipo}) respondio ${r.status}`);
     const data: any = await r.json();
     const opportunities: any[] = Array.isArray(data?.opportunities) ? data.opportunities : [];
@@ -128,7 +139,7 @@ async function syncLeadsForAgent(
     };
     if (searchAfter) body.searchAfter = searchAfter;
 
-    const r = await fetch(`${GHL_BASE}/contacts/search`, {
+    const r = await fetchWithTimeout(`${GHL_BASE}/contacts/search`, {
       method: "POST",
       headers,
       body: JSON.stringify(body),
