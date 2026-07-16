@@ -204,7 +204,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         leadsContactosRevisados++;
         const agente = agentesById.get(c.assignedTo);
         if (!agente) continue;
-        const fecha = c.dateUpdated || c.dateAdded || new Date().toISOString();
+        // dateAdded (fecha real de creacion), no dateUpdated: asi coincide con como
+        // el director mide "leads" en GHL (filtro de fecha de creacion de usuario).
+        const fecha = c.dateAdded || c.dateUpdated || new Date().toISOString();
         rows.push({ contacto_id: c.id, agente, tipo: "lead", fecha });
       }
       if (rows.length > 0) {
