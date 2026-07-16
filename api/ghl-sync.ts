@@ -6,6 +6,7 @@ const GHL_VERSION = "2021-07-28";
 const TIME_BUDGET_MS = 32000;
 const REQUEST_TIMEOUT_MS = 12000;
 const CURSOR_KEY = "ghl_sync_cursor";
+const CUTOFF_KEY = "registro_ftd_cutoff";
 const PAGE_LIMIT = 100;
 const MAX_RETRIES_429 = 4;
 
@@ -61,7 +62,14 @@ function timeLeft(started: number): number {
 // no intenta averiguar de quien es el contacto aca: eso se resuelve del
 // lado del contacto (paso 2), que es la unica fuente que ya probamos
 // exacta para "a que agente pertenece este contacto".
-async function cargarOportunidadesPipeline(headers: Record<string, string>, locationId: string) {
+//
+// cutoffMs: los numeros historicos (de antes de este corte) ya quedaron
+// sembrados a mano en la base con los valores reales que confirmo el
+// director, porque la atribucion por "dueno actual" en GHL no coincide
+// con esos totales (los contactos se reasignan entre agentes con el
+// tiempo). De aca en adelante solo sumamos lo que pasa DESPUES del corte,
+// que es donde la atribucion por dueno actual si es confiable.
+async function cargarOportunidadesPipeline(headers: Record<string, string>, locationId: string, cutoffMs: number) {
   const registro = new Map<string, string>();
   const ftd = new Map<string, string>();
   let startAfter: number | undefined;
@@ -88,9 +96,17 @@ async function cargarOportunidadesPipeline(headers: Record<string, string>, loca
     for (const o of opportunities) {
       revisadas++;
       if (!o.contactId) continue;
-      registro.set(o.contactId, o.createdAt || o.lastStageChangeAt || o.updatedAt || new Date().toISOString());
+
+      const fechaRegistro = o.createdAt || o.lastStageChangeAt || o.updatedAt || new Date().toISOString();
+      if (new Date(fechaRegistro).getTime() > cutoffMs) {
+        registro.set(o.contactId, fechaRegistro);
+      }
+
       if (o.pipelineStageId === FTD_STAGE_ID) {
-        ftd.set(o.contactId, o.lastStageChangeAt || o.updatedAt || o.createdAt || new Date().toISOString());
+        const fechaFtd = o.lastStageChangeAt || o.updatedAt || o.createdAt || new Date().toISOString();
+        if (new Date(fechaFtd).getTime() > cutoffMs) {
+          ftd.set(o.contactId, fechaFtd);
+        }
       }
     }
 
@@ -206,6 +222,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { data: cursorRow } = await supabase.from("sync_state").select("value").eq("key", CURSOR_KEY).maybeSingle();
   const cursorState: CursorState = (cursorRow?.value as CursorState) || {};
 
+  const { data: cutoffRow } = await supabase.from("sync_state").select("value").eq("key", CUTOFF_KEY).maybeSingle();
+  const cutoffMs = cutoffRow?.value ? new Date(cutoffRow.value as string).getTime() : Date.now();
+
   const headers = {
     Authorization: `Bearer ${token}`,
     Version: GHL_VERSION,
@@ -219,7 +238,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const { registro: pipelineRegistro, ftd: pipelineFtd, revisadas } = await cargarOportunidadesPipeline(
       headers,
-      locationId
+      locationId,
+      cutoffMs
     );
     resumen.pipeline = { oportunidadesRevisadas: revisadas, enRegistro: pipelineRegistro.size, enFtd: pipelineFtd.size };
 
