@@ -7,7 +7,6 @@ const TIME_BUDGET_MS = 32000;
 const REQUEST_TIMEOUT_MS = 12000;
 const CURSOR_KEY = "ghl_sync_cursor";
 const PAGE_LIMIT = 100;
-const CONTACT_LOOKUP_BATCH = 100;
 const MAX_RETRIES_429 = 4;
 
 const PIPELINE_ID = "oRjd1pUxOgNbzkdLBjWC";
@@ -41,17 +40,11 @@ interface EventoRow {
   fecha: string;
 }
 
-interface StageCursor {
-  startAfter?: number;
-  startAfterId?: string;
-}
-
 interface SearchCursor {
   searchAfter?: [number, string];
 }
 
 interface CursorState {
-  oportunidades?: StageCursor;
   leadsAgentIndex?: number;
   leadsAgentCursor?: SearchCursor;
 }
@@ -62,27 +55,20 @@ function timeLeft(started: number): number {
   return TIME_BUDGET_MS - (Date.now() - started);
 }
 
-// Registro y FTD se sacan de las oportunidades del Pipeline principal
-// (Registrado es la etapa de entrada, asi que estar en el pipeline ya cuenta
-// como registro; FTD Efectuado especificamente cuenta como ftd). El agente se
-// determina consultando el dueno ACTUAL del contacto en vivo contra GHL -
-// confirmado con datos reales que ni el assignedTo de la oportunidad ni una
-// copia guardada de "quien es el dueno" son confiables, porque los contactos
-// se reasignan entre agentes con el tiempo y esas fuentes quedan desactualizadas.
-async function syncOportunidades(
-  headers: Record<string, string>,
-  locationId: string,
-  agentesById: Map<string, string>,
-  supabase: Supabase,
-  started: number,
-  cursor: StageCursor | undefined
-) {
-  let startAfter = cursor?.startAfter;
-  let startAfterId = cursor?.startAfterId;
+// Trae TODAS las oportunidades del Pipeline principal (sin filtrar por
+// agente - esto ya esta probado como completo y exacto, coincide con los
+// totales del tablero de GHL). Solo arma dos mapas contactId -> fecha,
+// no intenta averiguar de quien es el contacto aca: eso se resuelve del
+// lado del contacto (paso 2), que es la unica fuente que ya probamos
+// exacta para "a que agente pertenece este contacto".
+async function cargarOportunidadesPipeline(headers: Record<string, string>, locationId: string) {
+  const registro = new Map<string, string>();
+  const ftd = new Map<string, string>();
+  let startAfter: number | undefined;
+  let startAfterId: string | undefined;
   let revisadas = 0;
-  let eventosGuardados = 0;
 
-  while (timeLeft(started) > 8000) {
+  for (;;) {
     const params = new URLSearchParams({
       location_id: locationId,
       pipeline_id: PIPELINE_ID,
@@ -97,73 +83,39 @@ async function syncOportunidades(
     if (!r.ok) throw new Error(`GHL /opportunities/search respondio ${r.status}`);
     const data: any = await r.json();
     const opportunities: any[] = Array.isArray(data?.opportunities) ? data.opportunities : [];
-    if (opportunities.length === 0) {
-      return { done: true, cursor: undefined, revisadas, eventosGuardados };
-    }
+    if (opportunities.length === 0) break;
 
-    // Dueno actual en vivo, agrupado: un solo pedido con hasta 100 ids en vez
-    // de un GET por contacto (mucho menos propenso al limite de velocidad).
-    const idsUnicos = Array.from(new Set(opportunities.map((o) => o.contactId).filter(Boolean)));
-    const contactoAAgente = new Map<string, string | null>();
-    for (let i = 0; i < idsUnicos.length; i += CONTACT_LOOKUP_BATCH) {
-      const loteIds = idsUnicos.slice(i, i + CONTACT_LOOKUP_BATCH);
-      const cr = await fetchWithTimeout(`${GHL_BASE}/contacts/search`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          locationId,
-          pageLimit: loteIds.length,
-          filters: [{ field: "id", operator: "contains_set", value: loteIds }],
-        }),
-      });
-      if (!cr.ok) {
-        const detalle = await cr.text().catch(() => "");
-        throw new Error(`GHL /contacts/search (busqueda por id) respondio ${cr.status}: ${detalle.slice(0, 300)}`);
-      }
-      const cbody: any = await cr.json().catch(() => null);
-      const contactos: any[] = Array.isArray(cbody?.contacts) ? cbody.contacts : [];
-      for (const c of contactos) {
-        const agente = c.assignedTo ? agentesById.get(c.assignedTo) ?? null : null;
-        contactoAAgente.set(c.id, agente);
-      }
-      if (i + CONTACT_LOOKUP_BATCH < idsUnicos.length) await sleep(200);
-    }
-
-    const rows: EventoRow[] = [];
     for (const o of opportunities) {
       revisadas++;
-      const agente = contactoAAgente.get(o.contactId);
-      if (!agente) continue;
-      const fechaRegistro = o.createdAt || o.lastStageChangeAt || o.updatedAt || new Date().toISOString();
-      rows.push({ contacto_id: o.contactId, agente, tipo: "registro", fecha: fechaRegistro });
+      if (!o.contactId) continue;
+      registro.set(o.contactId, o.createdAt || o.lastStageChangeAt || o.updatedAt || new Date().toISOString());
       if (o.pipelineStageId === FTD_STAGE_ID) {
-        const fechaFtd = o.lastStageChangeAt || o.updatedAt || o.createdAt || new Date().toISOString();
-        rows.push({ contacto_id: o.contactId, agente, tipo: "ftd", fecha: fechaFtd });
+        ftd.set(o.contactId, o.lastStageChangeAt || o.updatedAt || o.createdAt || new Date().toISOString());
       }
-    }
-    if (rows.length > 0) {
-      const { error } = await supabase.from("eventos").upsert(rows, { onConflict: "contacto_id,tipo" });
-      if (error) throw new Error(`Error guardando registro/ftd: ${error.message}`);
-      eventosGuardados += rows.length;
     }
 
     const meta = data?.meta;
-    if (!meta?.nextPage || opportunities.length < PAGE_LIMIT) {
-      return { done: true, cursor: undefined, revisadas, eventosGuardados };
-    }
+    if (!meta?.nextPage || opportunities.length < PAGE_LIMIT) break;
     startAfter = meta.startAfter;
     startAfterId = meta.startAfterId;
   }
 
-  return { done: false, cursor: { startAfter, startAfterId }, revisadas, eventosGuardados };
+  return { registro, ftd, revisadas };
 }
 
-// Leads: por agente (assignedTo), validado como exacto contra GHL.
-async function syncLeadsAgente(
+// Leads (y ahora tambien registro/ftd) por agente: se pide por assignedTo,
+// que ya probamos que coincide exacto con GHL contacto por contacto. Para
+// cada contacto de este agente, si su id aparece en el mapa de oportunidades
+// del pipeline, tambien cuenta como registro/ftd - cruzando dos fuentes que
+// ya sabemos que son correctas por separado, sin depender de ningun filtro
+// nuevo de GHL ni de una copia guardada de "quien es el dueno".
+async function syncAgente(
   ghlUserId: string,
   agenteNombre: string,
   headers: Record<string, string>,
   locationId: string,
+  pipelineRegistro: Map<string, string>,
+  pipelineFtd: Map<string, string>,
   supabase: Supabase,
   started: number,
   cursor: SearchCursor | undefined
@@ -198,10 +150,19 @@ async function syncLeadsAgente(
       contactosRevisados++;
       const fecha = c.dateAdded || c.dateUpdated || new Date().toISOString();
       rows.push({ contacto_id: c.id, agente: agenteNombre, tipo: "lead", fecha });
+
+      const fechaRegistro = pipelineRegistro.get(c.id);
+      if (fechaRegistro) {
+        rows.push({ contacto_id: c.id, agente: agenteNombre, tipo: "registro", fecha: fechaRegistro });
+      }
+      const fechaFtd = pipelineFtd.get(c.id);
+      if (fechaFtd) {
+        rows.push({ contacto_id: c.id, agente: agenteNombre, tipo: "ftd", fecha: fechaFtd });
+      }
     }
     if (rows.length > 0) {
       const { error } = await supabase.from("eventos").upsert(rows, { onConflict: "contacto_id,tipo" });
-      if (error) throw new Error(`Error guardando leads (${agenteNombre}): ${error.message}`);
+      if (error) throw new Error(`Error guardando datos (${agenteNombre}): ${error.message}`);
       eventosGuardados += rows.length;
     }
 
@@ -241,7 +202,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (agentesList.length === 0) {
     return res.status(200).json({ ok: true, note: "La tabla agentes esta vacia, nada para sincronizar" });
   }
-  const agentesById = new Map<string, string>(agentesList.map((a) => [a.ghl_user_id, a.nombre]));
 
   const { data: cursorRow } = await supabase.from("sync_state").select("value").eq("key", CURSOR_KEY).maybeSingle();
   const cursorState: CursorState = (cursorRow?.value as CursorState) || {};
@@ -257,45 +217,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const nextCursor: CursorState = {};
 
   try {
-    const oportunidadesResult = await syncOportunidades(
+    const { registro: pipelineRegistro, ftd: pipelineFtd, revisadas } = await cargarOportunidadesPipeline(
       headers,
-      locationId,
-      agentesById,
-      supabase,
-      started,
-      cursorState.oportunidades
+      locationId
     );
-    resumen.oportunidades = {
-      revisadas: oportunidadesResult.revisadas,
-      eventosGuardados: oportunidadesResult.eventosGuardados,
-      completo: oportunidadesResult.done,
-    };
-    if (!oportunidadesResult.done) nextCursor.oportunidades = oportunidadesResult.cursor;
+    resumen.pipeline = { oportunidadesRevisadas: revisadas, enRegistro: pipelineRegistro.size, enFtd: pipelineFtd.size };
 
     let agentIndex = cursorState.leadsAgentIndex ?? 0;
     let agentCursor = cursorState.leadsAgentCursor;
-    let leadsContactosRevisados = 0;
-    let leadsEventosGuardados = 0;
-    let leadsCompleto = true;
+    let contactosRevisados = 0;
+    let eventosGuardados = 0;
     let agentesProcesados = 0;
+    let completo = true;
 
     for (; agentIndex < agentesList.length; agentIndex++) {
       const agente = agentesList[agentIndex];
-      const result = await syncLeadsAgente(
+      const result = await syncAgente(
         agente.ghl_user_id,
         agente.nombre,
         headers,
         locationId,
+        pipelineRegistro,
+        pipelineFtd,
         supabase,
         started,
         agentCursor
       );
-      leadsContactosRevisados += result.contactosRevisados;
-      leadsEventosGuardados += result.eventosGuardados;
+      contactosRevisados += result.contactosRevisados;
+      eventosGuardados += result.eventosGuardados;
       agentesProcesados++;
 
       if (!result.done) {
-        leadsCompleto = false;
+        completo = false;
         nextCursor.leadsAgentIndex = agentIndex;
         nextCursor.leadsAgentCursor = result.cursor;
         break;
@@ -303,13 +256,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       agentCursor = undefined;
     }
 
-    resumen.leads = {
-      agentesProcesados,
-      totalAgentes: agentesList.length,
-      contactosRevisados: leadsContactosRevisados,
-      eventosGuardados: leadsEventosGuardados,
-      completo: leadsCompleto,
-    };
+    resumen.agentes = { agentesProcesados, totalAgentes: agentesList.length, contactosRevisados, eventosGuardados, completo };
   } catch (err: any) {
     await supabase.from("sync_state").upsert({ key: CURSOR_KEY, value: nextCursor });
     return res.status(502).json({ error: err?.message || "Error sincronizando con GHL", resumen });
