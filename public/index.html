@@ -518,11 +518,11 @@
   var adminPanelOpen = false;
 
   var INACT_PRESETS = [
-    { id: "hoy", label: "Hoy", dias: 1, ventana: "hoy" },
-    { id: "ayer", label: "Ayer", dias: 2, ventana: "los últimos 2 días" },
-    { id: "3d", label: "3 días", dias: 3, ventana: "los últimos 3 días" },
-    { id: "4d", label: "4 días", dias: 4, ventana: "los últimos 4 días" },
-    { id: "5d", label: "5 días", dias: 5, ventana: "los últimos 5 días" },
+    { id: "hoy", label: "Hoy", offset: 0, ventana: "hoy" },
+    { id: "ayer", label: "Ayer", offset: 1, ventana: "ayer" },
+    { id: "3d", label: "3 días", offset: 3, ventana: "hace 3 días" },
+    { id: "4d", label: "4 días", offset: 4, ventana: "hace 4 días" },
+    { id: "5d", label: "5 días", offset: 5, ventana: "hace 5 días" },
   ];
   var currentInactPreset = "hoy";
 
@@ -1053,19 +1053,14 @@
       "Actualizado " + new Date(data.actualizado || Date.now()).toLocaleTimeString("es-419", { hour: "2-digit", minute: "2-digit" });
   }
 
-  // Inicio (00:00 local) del dia que quedo "dias" atras contando hoy como
-  // el primero: dias=1 -> hoy, dias=2 -> desde ayer, dias=3 -> desde
-  // anteayer, etc.
-  function inicioDiaHace(dias) {
-    var d = new Date();
-    d.setHours(0, 0, 0, 0);
-    d.setDate(d.getDate() - (dias - 1));
-    return d;
-  }
-
-  function activoEnVentana(fechaIso, dias) {
+  // Compara contra un dia calendario puntual (no acumulado): offset=0 es
+  // hoy, offset=1 es ayer, offset=3 es exactamente hace 3 dias, etc.
+  function activoEseDia(fechaIso, offsetDias) {
     if (!fechaIso) return false;
-    return new Date(fechaIso).getTime() >= inicioDiaHace(dias).getTime();
+    var f = new Date(fechaIso);
+    var objetivo = new Date();
+    objetivo.setDate(objetivo.getDate() - offsetDias);
+    return f.getFullYear() === objetivo.getFullYear() && f.getMonth() === objetivo.getMonth() && f.getDate() === objetivo.getDate();
   }
 
   function renderInactividadView(data) {
@@ -1073,7 +1068,7 @@
     var agentes = (data.agentes || []).slice();
 
     var withStatus = agentes.map(function (a) {
-      var activo = activoEnVentana(a.ultimaConversion, preset.dias);
+      var activo = activoEseDia(a.ultimaConversion, preset.offset);
       return { agente: a.agente, alerta: !activo, fechaOrden: a.ultimaConversion || "" };
     });
     withStatus.sort(function (a, b) {
@@ -1098,13 +1093,13 @@
     card.appendChild(el("div", { class: "section-title", text: "Alerta de inactividad" }));
     card.appendChild(el("div", {
       class: "section-desc",
-      text: "Verde: tuvo un registro o FTD en " + preset.ventana + ". Rojo: no.",
+      text: "Verde: tuvo un registro o FTD " + preset.ventana + ". Rojo: no.",
     }));
     if (withStatus.length === 0) {
       card.appendChild(el("div", { class: "section-desc", text: "Todavía no hay agentes para revisar." }));
     }
     withStatus.forEach(function (s) {
-      var estado = s.alerta ? "Sin FTD ni registro" : "Hizo FTD o registro";
+      var estado = (s.alerta ? "Sin FTD ni registro " : "Hizo FTD o registro ") + preset.ventana;
       card.appendChild(el("div", { class: "inact-row" + (s.alerta ? " alert" : "") }, [
         el("div", { class: "inact-dot" }),
         el("div", { class: "agente-name", text: s.agente }),
