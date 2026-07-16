@@ -2,6 +2,8 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 const GHL_BASE = "https://services.leadconnectorhq.com";
 const GHL_VERSION = "2021-07-28";
+const PIPELINE_ID = "oRjd1pUxOgNbzkdLBjWC";
+const REGISTRADO_STAGE = "09b221aa-9791-4f05-8869-1b4ac8c86e06";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const secret = process.env.WEBHOOK_SECRET;
@@ -21,11 +23,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     Accept: "application/json",
   };
 
-  const r = await fetch(`${GHL_BASE}/opportunities/pipelines?locationId=${locationId}`, { headers });
+  const params = new URLSearchParams({
+    location_id: locationId,
+    pipeline_id: PIPELINE_ID,
+    pipeline_stage_id: REGISTRADO_STAGE,
+    limit: "5",
+  });
+
+  const r = await fetch(`${GHL_BASE}/opportunities/search?${params.toString()}`, { headers });
   const body = await r.json().catch(() => ({ parseError: true }));
 
   return res.status(200).json({
-    intento: "GET /opportunities/pipelines",
+    intento: "GET /opportunities/search filtrado por pipeline+stage",
+    urlUsada: `${GHL_BASE}/opportunities/search?${params.toString()}`,
     status: r.status,
     respuesta: body,
   });
