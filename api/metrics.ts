@@ -87,12 +87,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // el filtro de fecha activo, para que la alerta de inactividad tenga
   // sentido sin importar que vista de fechas este mirando el director. Se
   // manda la lista completa de fechas (no solo la ultima) porque la alerta
-  // necesita comprobar dias puntuales (hoy, ayer, hace 3 dias...) y un
-  // agente puede haber tenido actividad en varios de esos dias a la vez -
-  // quedarse solo con la mas reciente esconde las demas. Se excluyen las
-  // filas "baseline-*" (el historico sembrado a mano, sin fecha real) y se
-  // limita a la ultima semana para no mandar de mas.
-  const unaSemanaAtras = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  // necesita comprobar dias puntuales (hoy, ayer, hace 3 dias...) y un rango
+  // personalizado, y un agente puede haber tenido actividad en varios dias a
+  // la vez - quedarse solo con la mas reciente esconde las demas. Se
+  // excluyen las filas "baseline-*" (el historico sembrado a mano, sin fecha
+  // real) y se limita a un mes para no mandar de mas (igual no hay datos
+  // reales de antes del corte).
+  const unMesAtras = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   const conversionesRecientes = new Map<string, { fecha: string; tipo: "registro" | "ftd" }[]>();
   for (let offset = 0; ; offset += PAGE) {
     const { data: page, error } = await supabase
@@ -100,7 +101,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .select("agente, fecha, tipo")
       .in("tipo", ["registro", "ftd"])
       .not("contacto_id", "like", "baseline-%")
-      .gte("fecha", unaSemanaAtras)
+      .gte("fecha", unMesAtras)
       .range(offset, offset + PAGE - 1);
     if (error) {
       return res.status(500).json({ error: "Error leyendo actividad reciente" });

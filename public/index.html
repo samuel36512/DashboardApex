@@ -384,6 +384,31 @@
     font-weight: 600;
   }
 
+  /* ---- Rango personalizado ---- */
+  .range-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 10px 12px;
+    margin-bottom: 20px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface-1);
+  }
+  .range-row.active { border-color: var(--series-1); }
+  .range-label { font-size: 12px; color: var(--text-secondary); }
+  .range-row span { color: var(--text-muted); font-size: 12px; }
+  .range-input {
+    font: inherit;
+    font-size: 12px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--page);
+    color: var(--text-primary);
+  }
+
   /* ---- Welcome screen ---- */
   .welcome-wrap {
     min-height: 100vh;
@@ -522,14 +547,15 @@
   var adminPanelOpen = false;
 
   var INACT_PRESETS = [
+    { id: "4h", label: "4 horas", tipo: "horas", horas: 4, ventana: "en las últimas 4 horas" },
     { id: "8h", label: "8 horas", tipo: "horas", horas: 8, ventana: "en las últimas 8 horas" },
     { id: "hoy", label: "Hoy", tipo: "dia", offset: 0, ventana: "hoy" },
     { id: "ayer", label: "Ayer", tipo: "dia", offset: 1, ventana: "ayer" },
     { id: "3d", label: "3 días", tipo: "dia", offset: 3, ventana: "hace 3 días" },
-    { id: "4d", label: "4 días", tipo: "dia", offset: 4, ventana: "hace 4 días" },
-    { id: "5d", label: "5 días", tipo: "dia", offset: 5, ventana: "hace 5 días" },
   ];
   var currentInactPreset = "hoy";
+  var customDesde = "";
+  var customHasta = "";
 
   var KNOWN_EMAILS = {
     "Ana Sánchez": "92anasp@gmail.com",
@@ -1059,11 +1085,20 @@
 
   // Filtra los eventos recientes del agente segun el preset elegido: "dia"
   // compara contra un dia calendario puntual (offset=0 hoy, 1 ayer, etc, no
-  // acumulado), "horas" es una ventana movil desde ahora (ej. ultimas 8h).
+  // acumulado), "horas" es una ventana movil desde ahora (ej. ultimas 8h),
+  // "rango" es un rango de fechas que el director elige libremente.
   function eventosEnVentana(eventos, preset) {
     if (preset.tipo === "horas") {
       var limite = Date.now() - preset.horas * 60 * 60 * 1000;
       return (eventos || []).filter(function (e) { return new Date(e.fecha).getTime() >= limite; });
+    }
+    if (preset.tipo === "rango") {
+      var inicio = new Date(preset.desde + "T00:00:00");
+      var fin = new Date(preset.hasta + "T23:59:59.999");
+      return (eventos || []).filter(function (e) {
+        var t = new Date(e.fecha).getTime();
+        return t >= inicio.getTime() && t <= fin.getTime();
+      });
     }
     var objetivo = new Date();
     objetivo.setDate(objetivo.getDate() - preset.offset);
@@ -1077,7 +1112,18 @@
   var ESTADO_TEXTO = { ftd: "Hizo FTD", registro: "Solo hizo registro", ninguno: "Sin actividad de registros ni FTD" };
 
   function renderInactividadView(data) {
-    var preset = INACT_PRESETS.filter(function (p) { return p.id === currentInactPreset; })[0] || INACT_PRESETS[0];
+    var preset;
+    if (currentInactPreset === "custom" && customDesde && customHasta) {
+      preset = {
+        id: "custom",
+        tipo: "rango",
+        desde: customDesde,
+        hasta: customHasta,
+        ventana: customDesde === customHasta ? "el " + customDesde : "entre " + customDesde + " y " + customHasta,
+      };
+    } else {
+      preset = INACT_PRESETS.filter(function (p) { return p.id === currentInactPreset; })[0] || INACT_PRESETS[0];
+    }
     var agentes = (data.agentes || []).slice();
 
     var withStatus = agentes.map(function (a) {
@@ -1106,6 +1152,25 @@
       filterRow.appendChild(btn);
     });
     content.appendChild(filterRow);
+
+    var desdeInput = el("input", { type: "date", class: "range-input", value: customDesde || "" });
+    var hastaInput = el("input", { type: "date", class: "range-input", value: customHasta || "" });
+    var aplicarBtn = el("button", { class: "btn", text: "Aplicar" });
+    aplicarBtn.addEventListener("click", function () {
+      if (!desdeInput.value || !hastaInput.value) return;
+      customDesde = desdeInput.value;
+      customHasta = hastaInput.value > desdeInput.value ? hastaInput.value : desdeInput.value;
+      currentInactPreset = "custom";
+      renderInactividadView(data);
+    });
+    var rangeRow = el("div", { class: "range-row" + (currentInactPreset === "custom" ? " active" : "") }, [
+      el("span", { class: "range-label", text: "Rango personalizado:" }),
+      desdeInput,
+      el("span", { text: "→" }),
+      hastaInput,
+      aplicarBtn,
+    ]);
+    content.appendChild(rangeRow);
 
     var card = el("div", { class: "card" });
     card.appendChild(el("div", { class: "section-title", text: "Alerta de inactividad" }));
