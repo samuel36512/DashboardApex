@@ -123,6 +123,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const pct = (num: number, den: number) => (den > 0 ? Math.round((num / den) * 10000) / 100 : 0);
 
+  // Estimado de "mejores pagos": comision de ventas ya ganada + un bono
+  // aproximado por cada FTD (el valor real de venta varia por producto, asi
+  // que esto es una proyeccion, no una cifra contable exacta).
+  const comisionPorFtd = Number(process.env.COMISION_POR_FTD_USD ?? 8);
+
   const agentes = Array.from(byAgent.entries())
     .map(([agente, a]) => ({
       agente,
@@ -131,6 +136,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ftds: a.ftds,
       ventasUSD: a.ventasUSD,
       comisionUSD: a.comisionUSD,
+      gananciaEstimadaUSD: a.comisionUSD + a.ftds * comisionPorFtd,
       conversionesRecientes: conversionesRecientes.get(agente) || [],
       conversion: {
         leadToRegistro: pct(a.registros, a.leads),

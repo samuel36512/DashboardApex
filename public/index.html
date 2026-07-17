@@ -763,8 +763,8 @@
     },
     {
       view: "ranking",
-      label: "Ranking por FTD",
-      desc: "Tu equipo ordenado de mejor a peor por FTD convertido.",
+      label: "Ranking equipo",
+      desc: "Tu equipo ordenado por FTD convertido y por mejores pagos del mes.",
     },
     {
       view: "inactividad",
@@ -881,7 +881,7 @@
 
   var VIEW_TITLES = {
     dashboard: "Conversión de FTDs",
-    ranking: "Ranking por FTD",
+    ranking: "Ranking equipo",
     inactividad: "Alerta de inactividad",
     usuarios: "Registros y FTD",
     "ventas-equipo": "Ventas del equipo",
@@ -1205,9 +1205,37 @@
     return rankCard;
   }
 
+  function buildPagosRankingCard(data) {
+    var esDirector = data.rol === "director";
+    var porPago = (data.agentes || []).slice().sort(function (a, b) { return (b.gananciaEstimadaUSD || 0) - (a.gananciaEstimadaUSD || 0); });
+    var rankCard = el("div", { class: "card" });
+    rankCard.appendChild(el("div", { class: "section-title", text: "Ranking mejores pagos" }));
+    rankCard.appendChild(el("div", {
+      class: "section-desc",
+      text: esDirector
+        ? "Estimado del mes: comisión de ventas ya ganada + bono por FTD convertido."
+        : "Tu posición se muestra completa solo para el director.",
+    }));
+    if (porPago.length === 0) {
+      rankCard.appendChild(el("div", { class: "section-desc", text: "Todavía no hay datos para estimar." }));
+    }
+    porPago.forEach(function (a, i) {
+      rankCard.appendChild(el("div", { class: "rank-row" + (i === 0 && esDirector ? " top" : "") }, [
+        el("div", { class: "rank-num", text: esDirector ? String(i + 1) : "?" }),
+        el("div", { class: "agente-name", text: a.agente, title: a.agente }),
+        el("div", { class: "rank-ftd" }, [
+          document.createTextNode(currency.format(a.gananciaEstimadaUSD || 0)),
+          el("small", { text: "est." }),
+        ]),
+      ]));
+    });
+    return rankCard;
+  }
+
   function renderRankingView(data) {
     var content = el("div");
     content.appendChild(el("section", {}, [buildRankingCard(data)]));
+    content.appendChild(el("section", {}, [buildPagosRankingCard(data)]));
     renderContentState(content);
     document.getElementById("updated-label").textContent =
       "Actualizado " + new Date(data.actualizado || Date.now()).toLocaleTimeString("es-419", { hour: "2-digit", minute: "2-digit" });
