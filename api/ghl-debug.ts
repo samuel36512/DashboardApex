@@ -127,6 +127,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     Accept: "application/json",
   };
 
+  // Muestra el ghl_user_id que tenemos guardado para un agente, para
+  // compararlo contra el "assignedTo"/"opportunityAsignadaA" que devuelve
+  // GHL en una oportunidad puntual - si no coinciden, esa oportunidad cae en
+  // "sinDueno" y el sync la descarta en silencio.
+  const agenteIdQuery = typeof req.query.agenteid === "string" ? req.query.agenteid.trim() : "";
+  if (agenteIdQuery) {
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from("agentes")
+      .select("nombre, ghl_user_id, activo")
+      .ilike("nombre", `%${agenteIdQuery}%`);
+    if (error) return res.status(500).json({ error: error.message });
+    return res.status(200).json({ agentes: data ?? [] });
+  }
+
   if (req.query.cutoff === "1") {
     const supabase = getSupabase();
     const { data: cutoffRow } = await supabase
