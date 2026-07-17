@@ -1907,7 +1907,7 @@
     var criticoCosto = agentes.filter(function (a) {
       return a.tier && (a.costoPorFtdCOP === null || a.costoPorFtdCOP > 80000);
     });
-    var criticoFtd = agentes.filter(function (a) { return (a.ftdsMes || 0) < 15; });
+    var criticoFtd = agentes.filter(function (a) { return a.agente !== "Santiago Sandoval" && (a.ftdsMes || 0) < 15; });
     var criticoVentas = agentes.filter(function (a) { return (a.membresiasMes || 0) === 0; });
 
     function buildCriticoCard(titulo, desc, filas, valorFn) {
