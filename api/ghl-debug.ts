@@ -207,6 +207,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     resultados.push({
       contactId: c.id,
       nombre: contactFull.contactName || `${contactFull.firstName ?? ""} ${contactFull.lastName ?? ""}`.trim(),
+      telefono: contactFull.phone,
       contactoAsignadoA: contactFull.assignedTo,
       customFields: contactFull.customFields,
       totalOpportunitiesDevueltas: opportunities.length,
