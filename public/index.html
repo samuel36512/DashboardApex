@@ -409,6 +409,27 @@
     color: var(--text-primary);
   }
 
+  /* ---- Filtro de agente (panel de usuarios) ---- */
+  .agente-filter-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface-1);
+  }
+  .agente-select {
+    font: inherit;
+    font-size: 12px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--page);
+    color: var(--text-primary);
+  }
+
   /* ---- Welcome screen ---- */
   .welcome-wrap {
     min-height: 100vh;
@@ -584,6 +605,11 @@
   var customDesde = "";
   var customHasta = "";
 
+  var usuariosDesde = "";
+  var usuariosHasta = "";
+  var usuariosAgente = "";
+  var lastUsuariosData = null;
+
   var KNOWN_EMAILS = {
     "Ana Sánchez": "92anasp@gmail.com",
     "Andry Camacho": "juliana1611sanchez@gmail.com",
@@ -738,6 +764,11 @@
       currentHasta = range.hasta;
     } else if (view === "inactividad") {
       currentInactPreset = "hoy";
+    } else if (view === "usuarios") {
+      var hoyStr = fmtDate(new Date());
+      usuariosDesde = hoyStr;
+      usuariosHasta = hoyStr;
+      usuariosAgente = "";
     }
     renderShell();
     renderLoading();
@@ -1272,11 +1303,57 @@
   }
 
   function renderUsuariosView(data) {
-    var registrosHoy = (data.registros || []).filter(function (f) { return esDiaObjetivo(f.fecha, 0); });
-    var ftdsHoy = (data.ftds || []).filter(function (f) { return esDiaObjetivo(f.fecha, 0); });
+    lastUsuariosData = data;
+    var registros = data.registros || [];
+    var ftds = data.ftds || [];
+
+    if (usuariosAgente) {
+      registros = registros.filter(function (f) { return f.agente === usuariosAgente; });
+      ftds = ftds.filter(function (f) { return f.agente === usuariosAgente; });
+    }
+
     var content = el("div");
-    content.appendChild(el("section", {}, [buildUserTable("Registros de hoy", registrosHoy)]));
-    content.appendChild(el("section", {}, [buildUserTable("FTD de hoy", ftdsHoy)]));
+
+    if (currentRol === "director") {
+      var agentes = Array.prototype.concat.call([], data.registros || [], data.ftds || [])
+        .map(function (f) { return f.agente; })
+        .filter(function (a, i, arr) { return arr.indexOf(a) === i; })
+        .sort();
+      var select = el("select", { class: "agente-select" }, [el("option", { value: "", text: "Todos los agentes" })]);
+      agentes.forEach(function (a) {
+        select.appendChild(el("option", { value: a, text: a }));
+      });
+      select.value = usuariosAgente;
+      select.addEventListener("change", function () {
+        usuariosAgente = select.value;
+        renderUsuariosView(lastUsuariosData);
+      });
+      content.appendChild(el("div", { class: "agente-filter-row" }, [
+        el("span", { class: "range-label", text: "Agente:" }),
+        select,
+      ]));
+    }
+
+    var desdeInput = el("input", { type: "date", class: "range-input", value: usuariosDesde || "" });
+    var hastaInput = el("input", { type: "date", class: "range-input", value: usuariosHasta || "" });
+    var aplicarBtn = el("button", { class: "btn", text: "Aplicar" });
+    aplicarBtn.addEventListener("click", function () {
+      if (!desdeInput.value || !hastaInput.value) return;
+      usuariosDesde = desdeInput.value;
+      usuariosHasta = hastaInput.value > desdeInput.value ? hastaInput.value : desdeInput.value;
+      loadMetrics(true, currentAccessToken);
+    });
+    content.appendChild(el("div", { class: "range-row active" }, [
+      el("span", { class: "range-label", text: "Rango de fechas:" }),
+      desdeInput,
+      el("span", { text: "→" }),
+      hastaInput,
+      aplicarBtn,
+    ]));
+
+    var rangoTexto = usuariosDesde === usuariosHasta ? "el " + usuariosDesde : "entre " + usuariosDesde + " y " + usuariosHasta;
+    content.appendChild(el("section", {}, [buildUserTable("Registros (" + rangoTexto + ")", registros)]));
+    content.appendChild(el("section", {}, [buildUserTable("FTD (" + rangoTexto + ")", ftds)]));
     renderContentState(content);
     document.getElementById("updated-label").textContent =
       "Actualizado " + new Date(data.actualizado || Date.now()).toLocaleTimeString("es-419", { hour: "2-digit", minute: "2-digit" });
@@ -1292,6 +1369,8 @@
     var qs = "";
     if (currentView === "dashboard" && currentDesde && currentHasta) {
       qs = "?desde=" + encodeURIComponent(currentDesde) + "&hasta=" + encodeURIComponent(currentHasta);
+    } else if (currentView === "usuarios" && usuariosDesde && usuariosHasta) {
+      qs = "?desde=" + encodeURIComponent(usuariosDesde) + "&hasta=" + encodeURIComponent(usuariosHasta);
     }
 
     fetch(endpoint + qs, { headers: { Authorization: "Bearer " + accessToken } })

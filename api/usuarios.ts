@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getSupabase } from "./_lib/supabase";
 
-const LIMITE = 300;
+const LIMITE = 500;
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "GET") {
@@ -34,6 +34,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const agenteRel = (perfil as any).agentes;
   const miNombre: string | undefined = Array.isArray(agenteRel) ? agenteRel[0]?.nombre : agenteRel?.nombre;
 
+  const desde = typeof req.query.desde === "string" ? req.query.desde : "";
+  const hasta = typeof req.query.hasta === "string" ? req.query.hasta : "";
+  if ((desde && Number.isNaN(Date.parse(desde))) || (hasta && Number.isNaN(Date.parse(hasta)))) {
+    return res.status(400).json({ error: "desde/hasta deben ser fechas validas (YYYY-MM-DD)" });
+  }
+
   async function traer(tipo: "registro" | "ftd") {
     // Se excluyen las filas "baseline-*" (historico sembrado a mano, sin
     // contactId ni nombre reales) porque no representan un cliente puntual
@@ -45,6 +51,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .not("contacto_id", "like", "baseline-%")
       .order("fecha", { ascending: false })
       .limit(LIMITE);
+    if (desde) query = query.gte("fecha", desde);
+    if (hasta) query = query.lte("fecha", `${hasta}T23:59:59.999Z`);
     if (rol === "agente") query = query.eq("agente", miNombre ?? "");
 
     const { data, error } = await query;
@@ -66,6 +74,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ftds,
       rol,
       actualizado: new Date().toISOString(),
+      filtro: { desde: desde || null, hasta: hasta || null },
     });
   } catch (err: any) {
     return res.status(500).json({ error: err?.message || "Error leyendo usuarios" });
