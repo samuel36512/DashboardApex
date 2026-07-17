@@ -900,6 +900,25 @@
     },
   ];
 
+  var AGENT_NAV_ITEMS = [
+    {
+      view: "dashboard",
+      preset: "todo",
+      label: "Mis FTD",
+      desc: "Tus leads, registros, FTD y conversión hasta hoy.",
+    },
+    {
+      view: "usuarios",
+      label: "Mis clientes",
+      desc: "Los clientes que registraste o que hicieron FTD contigo, con fecha y filtro.",
+    },
+    {
+      view: "mi-ganancia",
+      label: "Mi ganancia",
+      desc: "Cuánto llevas ganado este mes y qué productos vendiste.",
+    },
+  ];
+
   function renderWelcome() {
     currentView = "welcome";
     adminPanelOpen = false;
@@ -911,23 +930,18 @@
       el("p", { class: "welcome-sub", text: currentEmail || "" }),
     ]);
 
-    if (currentRol === "director") {
-      var nav = el("div", { class: "welcome-nav" });
-      NAV_ITEMS.forEach(function (item) {
-        var card = el("button", { class: "nav-card" }, [
-          el("div", { class: "nav-icon" }),
-          el("div", { class: "nav-label", text: item.label }),
-          el("div", { class: "nav-desc", text: item.desc }),
-        ]);
-        card.addEventListener("click", function () { enterView(item.view, item.preset); });
-        nav.appendChild(card);
-      });
-      wrap.appendChild(nav);
-    } else {
-      var btn = el("button", { class: "welcome-btn", text: "Dashboard" });
-      btn.addEventListener("click", function () { enterView("dashboard", "todo"); });
-      wrap.appendChild(btn);
-    }
+    var items = currentRol === "director" ? NAV_ITEMS : AGENT_NAV_ITEMS;
+    var nav = el("div", { class: "welcome-nav" });
+    items.forEach(function (item) {
+      var card = el("button", { class: "nav-card" }, [
+        el("div", { class: "nav-icon" }),
+        el("div", { class: "nav-label", text: item.label }),
+        el("div", { class: "nav-desc", text: item.desc }),
+      ]);
+      card.addEventListener("click", function () { enterView(item.view, item.preset); });
+      nav.appendChild(card);
+    });
+    wrap.appendChild(nav);
 
     var logoutBtn = el("button", { class: "welcome-logout", text: "Salir" });
     logoutBtn.addEventListener("click", function () {
@@ -1003,6 +1017,7 @@
     usuarios: "Registros y FTD",
     "ventas-equipo": "Ventas del equipo",
     "pago-director": "Pago de directores",
+    "mi-ganancia": "Mi ganancia",
   };
 
   function renderShell() {
@@ -1545,6 +1560,54 @@
       "Actualizado " + new Date(data.actualizado || Date.now()).toLocaleTimeString("es-419", { hour: "2-digit", minute: "2-digit" });
   }
 
+  function renderMiGananciaView(data) {
+    var content = el("div");
+
+    var hero = el("div", { class: "card director-hero" }, [
+      el("div", { class: "dh-label", text: "Tu ganancia estimada este mes" }),
+      el("div", { class: "dh-total", text: currencyPrecise.format(data.totalUSD || 0) }),
+    ]);
+    hero.appendChild(el("div", { class: "dh-stats" }, [
+      el("div", { class: "dh-stat" }, [
+        el("span", { class: "dh-stat-label", text: "Comisión de ventas" }),
+        el("span", { class: "dh-stat-value", text: currencyPrecise.format(data.comisionUSD || 0) }),
+      ]),
+      el("div", { class: "dh-stat" }, [
+        el("span", { class: "dh-stat-label", text: (data.ftds || 0) + " FTD × $" + (data.comisionPorFtd || 8) }),
+        el("span", { class: "dh-stat-value", text: currencyPrecise.format(data.bonoFtdUSD || 0) }),
+      ]),
+    ]));
+    content.appendChild(el("section", {}, [hero]));
+
+    if (data.productos && data.productos.length > 0) {
+      var maxCantidad = data.productos.reduce(function (m, p) { return Math.max(m, p.cantidad); }, 0);
+      var productosCard = el("div", { class: "card" });
+      productosCard.appendChild(el("div", { class: "section-title", text: "Tus ventas por producto" }));
+      productosCard.appendChild(el("div", { class: "section-desc", text: "Unidades que vendiste de cada membresía/producto este mes." }));
+      data.productos.forEach(function (p) {
+        var widthPct = maxCantidad ? Math.max(4, (p.cantidad / maxCantidad) * 100) : 0;
+        productosCard.appendChild(el("div", { class: "bar-row" }, [
+          el("div", { class: "agente-name", text: p.producto, title: p.producto }),
+          el("div", { class: "bar-track" }, [
+            el("div", { class: "bar-fill", style: "width:" + widthPct + "%" }),
+          ]),
+          el("div", { class: "amount" }, [
+            el("span", { text: p.cantidad + (p.cantidad === 1 ? " venta" : " ventas") }),
+          ]),
+        ]));
+      });
+      content.appendChild(el("section", {}, [productosCard]));
+    } else {
+      content.appendChild(el("div", { class: "card state" }, [
+        el("div", { class: "big", text: "Todavía no tenés ventas este mes" }),
+      ]));
+    }
+
+    renderContentState(content);
+    document.getElementById("updated-label").textContent =
+      "Actualizado " + new Date(data.actualizado || Date.now()).toLocaleTimeString("es-419", { hour: "2-digit", minute: "2-digit" });
+  }
+
   // Compara una fecha contra un dia calendario puntual en la zona horaria
   // local del navegador (offset=0 hoy, 1 ayer, etc - no acumulado).
   function esDiaObjetivo(fechaIso, offset) {
@@ -1763,13 +1826,14 @@
     var endpoint = "/metrics";
     if (currentView === "usuarios") endpoint = "/usuarios";
     else if (currentView === "pago-director") endpoint = "/pago-director";
+    else if (currentView === "mi-ganancia") endpoint = "/mi-ganancia";
 
     var qs = "";
     if (currentView === "dashboard" && currentDesde && currentHasta) {
       qs = "?desde=" + encodeURIComponent(localDayStartIso(currentDesde)) + "&hasta=" + encodeURIComponent(localDayEndIso(currentHasta));
     } else if (currentView === "usuarios" && usuariosDesde && usuariosHasta) {
       qs = "?desde=" + encodeURIComponent(localDayStartIso(usuariosDesde)) + "&hasta=" + encodeURIComponent(localDayEndIso(usuariosHasta));
-    } else if (currentView === "pago-director") {
+    } else if (currentView === "pago-director" || currentView === "mi-ganancia") {
       var hoyStr = fmtDate(new Date());
       var inicioMesStr = fmtDate(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
       qs = "?desde=" + encodeURIComponent(localDayStartIso(inicioMesStr)) + "&hasta=" + encodeURIComponent(localDayEndIso(hoyStr));
@@ -1789,6 +1853,7 @@
         else if (currentView === "usuarios") renderUsuariosView(data);
         else if (currentView === "ventas-equipo") renderVentasEquipoView(data);
         else if (currentView === "pago-director") renderPagoDirectorView(data);
+        else if (currentView === "mi-ganancia") renderMiGananciaView(data);
         else renderData(data);
       })
       .catch(function (err) {
