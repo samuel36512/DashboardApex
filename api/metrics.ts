@@ -149,6 +149,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!page || page.length < PAGE) break;
   }
 
+  // Membresias vendidas este mes por agente (para "Estado critico" en la
+  // alerta de inactividad) - los productos "BOT..." son un servicio
+  // aparte, no cuentan como membresia segun el director.
+  const membresiasMesPorAgente = new Map<string, number>();
+  for (let offset = 0; ; offset += PAGE) {
+    const { data: page, error } = await supabase
+      .from("eventos")
+      .select("agente, producto")
+      .eq("tipo", "venta")
+      .gte("fecha", desdeMesCo)
+      .range(offset, offset + PAGE - 1);
+    if (error) {
+      return res.status(500).json({ error: "Error leyendo ventas del mes" });
+    }
+    for (const row of page ?? []) {
+      const producto = (row.producto || "").toLowerCase();
+      if (producto.includes("bot")) continue;
+      membresiasMesPorAgente.set(row.agente, (membresiasMesPorAgente.get(row.agente) ?? 0) + 1);
+    }
+    if (!page || page.length < PAGE) break;
+  }
+
   const pct = (num: number, den: number) => (den > 0 ? Math.round((num / den) * 10000) / 100 : 0);
 
   // Estimado de "mejores pagos": comision de ventas ya ganada + un bono
@@ -163,6 +185,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const tasaDiaria = tasaDiariaCOP(agente);
       const gastoPautaCOP = tasaDiaria !== null ? tasaDiaria * diaDelMes : null;
       const costoPorFtdCOP = gastoPautaCOP !== null && ftdsMes > 0 ? Math.round(gastoPautaCOP / ftdsMes) : null;
+      const membresiasMes = membresiasMesPorAgente.get(agente) ?? 0;
       return {
         agente,
         leads: a.leads,
@@ -174,6 +197,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ftdsMes,
         gastoPautaCOP,
         costoPorFtdCOP,
+        membresiasMes,
         gananciaEstimadaUSD: a.comisionUSD + a.ftds * comisionPorFtd,
         conversionesRecientes: conversionesRecientes.get(agente) || [],
         conversion: {

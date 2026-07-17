@@ -495,6 +495,36 @@
   }
   .cost-row.best .cost-value { color: var(--good); }
 
+  /* ---- Estado critico ---- */
+  .critico-title {
+    font-size: 16px;
+    font-weight: 700;
+    margin: 4px 0 12px;
+    color: var(--text-primary);
+  }
+  .critico-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 16px;
+  }
+  .critical-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--gridline);
+    font-size: 13px;
+  }
+  .critical-row:last-child { border-bottom: none; }
+  .critical-row .agente-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .critical-row .critical-value {
+    color: var(--danger);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
   /* ---- Table ---- */
   table {
     width: 100%;
@@ -1839,6 +1869,56 @@
       ]));
     });
     content.appendChild(el("section", {}, [card]));
+
+    // Estado critico: siempre sobre el mes en curso (costoPorFtdCOP,
+    // ftdsMes, membresiasMes ya vienen calculados asi desde el backend,
+    // independiente del filtro de arriba), asi que no cambia con los pills.
+    var criticoCosto = agentes.filter(function (a) {
+      return a.tier && (a.costoPorFtdCOP === null || a.costoPorFtdCOP > 80000);
+    });
+    var criticoFtd = agentes.filter(function (a) { return (a.ftdsMes || 0) < 15; });
+    var criticoVentas = agentes.filter(function (a) { return (a.membresiasMes || 0) === 0; });
+
+    function buildCriticoCard(titulo, desc, filas, valorFn) {
+      var c = el("div", { class: "card" });
+      c.appendChild(el("div", { class: "section-title", text: titulo }));
+      c.appendChild(el("div", { class: "section-desc", text: desc }));
+      if (filas.length === 0) {
+        c.appendChild(el("div", { class: "section-desc", text: "Nadie en estado crítico. 🎉" }));
+      }
+      filas.forEach(function (a) {
+        c.appendChild(el("div", { class: "critical-row" }, [
+          el("div", { class: "agente-name", text: a.agente, title: a.agente }),
+          el("div", { class: "critical-value", text: valorFn(a) }),
+        ]));
+      });
+      return c;
+    }
+
+    var criticoSection = el("div");
+    criticoSection.appendChild(el("h2", { class: "critico-title", text: "Estado crítico" }));
+    var criticoGrid = el("div", { class: "critico-grid" }, [
+      buildCriticoCard(
+        "Por costo publicitario",
+        "Costo por FTD de este mes por encima de $80.000 COP (o sin FTD todavía).",
+        criticoCosto,
+        function (a) { return a.costoPorFtdCOP !== null ? currencyCOP.format(a.costoPorFtdCOP) : "Sin FTD"; }
+      ),
+      buildCriticoCard(
+        "Por FTD",
+        "Menos de 15 FTD convertidos este mes.",
+        criticoFtd,
+        function (a) { return (a.ftdsMes || 0) + (a.ftdsMes === 1 ? " FTD" : " FTDs"); }
+      ),
+      buildCriticoCard(
+        "Por ventas",
+        "Sin ninguna membresía vendida este mes (no cuenta BOT IA).",
+        criticoVentas,
+        function () { return "0 membresías"; }
+      ),
+    ]);
+    criticoSection.appendChild(criticoGrid);
+    content.appendChild(criticoSection);
 
     renderContentState(content);
     document.getElementById("updated-label").textContent =
