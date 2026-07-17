@@ -324,6 +324,80 @@
   }
   .tsc-value.gold { color: var(--series-1); }
 
+  /* ---- Pago de directores ---- */
+  .director-hero {
+    text-align: center;
+    padding: 36px 28px;
+    background: radial-gradient(circle at 50% 0%, var(--series-1-soft), var(--surface-1) 70%);
+  }
+  .dh-label {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+  }
+  .dh-total {
+    font-size: 44px;
+    font-weight: 800;
+    color: var(--series-1);
+    font-variant-numeric: tabular-nums;
+    margin-bottom: 24px;
+  }
+  .dh-stats {
+    display: flex;
+    justify-content: center;
+    gap: 40px;
+    flex-wrap: wrap;
+    padding: 20px 0;
+    border-top: 1px solid var(--gridline);
+    border-bottom: 1px solid var(--gridline);
+    margin-bottom: 24px;
+  }
+  .dh-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .dh-stat-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+  }
+  .dh-stat-value {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+  }
+  .dh-progress-wrap { max-width: 480px; margin: 0 auto; text-align: left; }
+  .dh-progress-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+  }
+  .dh-progress-track {
+    height: 8px;
+    border-radius: 999px;
+    background: var(--surface-2, var(--gridline));
+    overflow: hidden;
+  }
+  .dh-progress-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: var(--series-1);
+    transition: width 0.3s;
+  }
+  .dh-progress-fill.full { background: var(--good); }
+  .dh-progress-caption {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 8px;
+  }
+
   /* ---- Table ---- */
   table {
     width: 100%;
@@ -781,6 +855,11 @@
       label: "Ventas del equipo",
       desc: "Facturación y comisión ganada de cada agente, mes a mes.",
     },
+    {
+      view: "pago-director",
+      label: "Pago de directores",
+      desc: "Cuánto vas ganando este mes, en tiempo real.",
+    },
   ];
 
   function renderWelcome() {
@@ -885,6 +964,7 @@
     inactividad: "Alerta de inactividad",
     usuarios: "Registros y FTD",
     "ventas-equipo": "Ventas del equipo",
+    "pago-director": "Pago de directores",
   };
 
   function renderShell() {
@@ -1326,6 +1406,50 @@
       "Actualizado " + new Date(data.actualizado || Date.now()).toLocaleTimeString("es-419", { hour: "2-digit", minute: "2-digit" });
   }
 
+  function renderPagoDirectorView(data) {
+    var content = el("div");
+
+    var hero = el("div", { class: "card director-hero" }, [
+      el("div", { class: "dh-label", text: "Tu pago estimado este mes" }),
+      el("div", { class: "dh-total", text: currencyPrecise.format(data.totalUSD || 0) }),
+    ]);
+
+    var stats = el("div", { class: "dh-stats" }, [
+      el("div", { class: "dh-stat" }, [
+        el("span", { class: "dh-stat-label", text: "Comisión de ventas" }),
+        el("span", { class: "dh-stat-value", text: currencyPrecise.format(data.comisionVentasUSD || 0) }),
+      ]),
+      el("div", { class: "dh-stat" }, [
+        el("span", { class: "dh-stat-label", text: "Bono por FTD del equipo" }),
+        el("span", { class: "dh-stat-value", text: currencyPrecise.format(data.bonoFtdUSD || 0) }),
+      ]),
+    ]);
+    hero.appendChild(stats);
+
+    var enAltaTasa = (data.teamFtds || 0) >= (data.umbralFtd || 1000);
+    var progressWrap = el("div", { class: "dh-progress-wrap" });
+    progressWrap.appendChild(el("div", { class: "dh-progress-label" }, [
+      el("span", { text: (data.teamFtds || 0).toLocaleString("en-US") + " FTD del equipo este mes" }),
+      el("span", { text: "$" + (data.tasaPorFtd || 0) + " por FTD" }),
+    ]));
+    var pct = Math.max(0, Math.min(100, ((data.teamFtds || 0) / (data.umbralFtd || 1000)) * 100));
+    progressWrap.appendChild(el("div", { class: "dh-progress-track" }, [
+      el("div", { class: "dh-progress-fill" + (enAltaTasa ? " full" : ""), style: "width:" + pct + "%" }),
+    ]));
+    progressWrap.appendChild(el("div", {
+      class: "dh-progress-caption",
+      text: enAltaTasa
+        ? "✓ Ya superaste los " + (data.umbralFtd || 1000).toLocaleString("en-US") + " FTD — estás ganando $" + (data.tasaAlta || 4) + " por FTD."
+        : "Te faltan " + Math.max(0, (data.umbralFtd || 1000) - (data.teamFtds || 0)).toLocaleString("en-US") + " FTD del equipo para subir a $" + (data.tasaAlta || 4) + " por FTD.",
+    }));
+    hero.appendChild(progressWrap);
+
+    content.appendChild(el("section", {}, [hero]));
+    renderContentState(content);
+    document.getElementById("updated-label").textContent =
+      "Actualizado " + new Date(data.actualizado || Date.now()).toLocaleTimeString("es-419", { hour: "2-digit", minute: "2-digit" });
+  }
+
   // Compara una fecha contra un dia calendario puntual en la zona horaria
   // local del navegador (offset=0 hoy, 1 ayer, etc - no acumulado).
   function esDiaObjetivo(fechaIso, offset) {
@@ -1541,12 +1665,19 @@
     if (refreshBtn) { refreshBtn.disabled = true; refreshBtn.textContent = "Actualizando…"; }
     if (manual) renderLoading();
 
-    var endpoint = currentView === "usuarios" ? "/usuarios" : "/metrics";
+    var endpoint = "/metrics";
+    if (currentView === "usuarios") endpoint = "/usuarios";
+    else if (currentView === "pago-director") endpoint = "/pago-director";
+
     var qs = "";
     if (currentView === "dashboard" && currentDesde && currentHasta) {
       qs = "?desde=" + encodeURIComponent(localDayStartIso(currentDesde)) + "&hasta=" + encodeURIComponent(localDayEndIso(currentHasta));
     } else if (currentView === "usuarios" && usuariosDesde && usuariosHasta) {
       qs = "?desde=" + encodeURIComponent(localDayStartIso(usuariosDesde)) + "&hasta=" + encodeURIComponent(localDayEndIso(usuariosHasta));
+    } else if (currentView === "pago-director") {
+      var hoyStr = fmtDate(new Date());
+      var inicioMesStr = fmtDate(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+      qs = "?desde=" + encodeURIComponent(localDayStartIso(inicioMesStr)) + "&hasta=" + encodeURIComponent(localDayEndIso(hoyStr));
     }
 
     fetch(endpoint + qs, { headers: { Authorization: "Bearer " + accessToken } })
@@ -1562,6 +1693,7 @@
         else if (currentView === "inactividad") renderInactividadView(data);
         else if (currentView === "usuarios") renderUsuariosView(data);
         else if (currentView === "ventas-equipo") renderVentasEquipoView(data);
+        else if (currentView === "pago-director") renderPagoDirectorView(data);
         else renderData(data);
       })
       .catch(function (err) {
