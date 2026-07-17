@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getSupabase } from "./_lib/supabase";
+import { AGENTE_TIER, diaDelMesColombia, tasaDiariaCOP } from "./_lib/agentTier";
 
 interface AgentAgg {
   leads: number;
@@ -8,34 +9,6 @@ interface AgentAgg {
   ventasUSD: number;
   comisionUSD: number;
 }
-
-// Categoria de pauta por agente (ejecutivo/junior), confirmada por el
-// director - define cuanto se le invierte por dia en publicidad. Los
-// agentes activos que no aparecen aca todavia no tienen categoria
-// asignada, asi que quedan afuera del calculo de costo por FTD.
-const AGENTE_TIER: Record<string, "ejecutivo" | "junior"> = {
-  "Angela Galindez": "ejecutivo",
-  "Fernando Sandoval": "ejecutivo",
-  "Henry Andrés Correa": "ejecutivo",
-  "Jhon Camacho": "ejecutivo",
-  "Juanita Sánchez": "ejecutivo",
-  "Luis Gómez": "ejecutivo",
-  "Nicolás Correa": "ejecutivo",
-  "Sergio Gallo": "junior",
-  "Santiago Charry": "junior",
-  "María Paula Guevara": "junior",
-  "Luna Sandoval": "junior",
-  "Luis Felipe Charry": "junior",
-  "Juan Ceballos": "junior",
-  "Gabriel Alejandro Monteverde": "junior",
-  "Diego Alejandro Mora": "junior",
-  "Daniela Charry": "junior",
-  "Ana Sánchez": "junior",
-  "Laura Charry": "junior",
-  "Andry Camacho": "junior",
-};
-const TASA_EJECUTIVO_COP = Number(process.env.TASA_PAUTA_EJECUTIVO_COP ?? 100000);
-const TASA_JUNIOR_COP = Number(process.env.TASA_PAUTA_JUNIOR_COP ?? 50000);
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "GET") {
@@ -155,7 +128,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // rango personalizado. FTD incluye el historico sembrado a mano (ya
   // viene atribuido a un agente puntual), es el total real del mes.
   const ahoraCo = new Date(Date.now() - 5 * 60 * 60 * 1000);
-  const diaDelMes = ahoraCo.getUTCDate();
+  const diaDelMes = diaDelMesColombia();
   const desdeMesCo = new Date(
     Date.UTC(ahoraCo.getUTCFullYear(), ahoraCo.getUTCMonth(), 1, 5, 0, 0)
   ).toISOString();
@@ -187,7 +160,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .map(([agente, a]) => {
       const tier = AGENTE_TIER[agente];
       const ftdsMes = ftdsMesPorAgente.get(agente) ?? 0;
-      const gastoPautaCOP = tier ? (tier === "ejecutivo" ? TASA_EJECUTIVO_COP : TASA_JUNIOR_COP) * diaDelMes : null;
+      const tasaDiaria = tasaDiariaCOP(agente);
+      const gastoPautaCOP = tasaDiaria !== null ? tasaDiaria * diaDelMes : null;
       const costoPorFtdCOP = gastoPautaCOP !== null && ftdsMes > 0 ? Math.round(gastoPautaCOP / ftdsMes) : null;
       return {
         agente,

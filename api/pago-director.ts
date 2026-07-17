@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getSupabase } from "./_lib/supabase";
+import { diaDelMesColombia, tasaDiariaCOP } from "./_lib/agentTier";
 
 // Tasa por FTD del equipo que gana el director, y el umbral (FTD del mes)
 // a partir del cual sube de $3 a $4 por FTD. Configurables por si cambian.
@@ -107,17 +108,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const bonoFtdUSD = teamFtds * tasaPorFtd;
   const totalUSD = comisionVentasUSD + bonoFtdUSD;
 
-  const agentesArr = Array.from(byAgent.entries()).map(([agente, a]) => ({
-    agente,
-    ftds: a.ftds,
-    ventasUSD: a.ventasUSD,
-  }));
+  // Costo por FTD por agente, para la "estrella en costo por FTD" - usa el
+  // mismo dia-del-mes y las mismas tasas que "Conversion de FTDs", y como
+  // desde/hasta ya vienen fijados al mes en curso para esta vista, a.ftds
+  // ya es el conteo real del mes (no hace falta una consulta aparte).
+  const diaDelMes = diaDelMesColombia();
+  const agentesArr = Array.from(byAgent.entries()).map(([agente, a]) => {
+    const tasaDiaria = tasaDiariaCOP(agente);
+    const gastoPautaCOP = tasaDiaria !== null ? tasaDiaria * diaDelMes : null;
+    const costoPorFtdCOP = gastoPautaCOP !== null && a.ftds > 0 ? Math.round(gastoPautaCOP / a.ftds) : null;
+    return { agente, ftds: a.ftds, ventasUSD: a.ventasUSD, costoPorFtdCOP };
+  });
   const estrellaFtd = agentesArr.slice().sort((a, b) => b.ftds - a.ftds)[0] ?? null;
   const estrellaVentas = agentesArr.slice().sort((a, b) => b.ventasUSD - a.ventasUSD)[0] ?? null;
   const necesitaAtencion =
     agentesArr
       .slice()
       .sort((a, b) => a.ftds - b.ftds || a.ventasUSD - b.ventasUSD)[0] ?? null;
+  const conCosto = agentesArr.filter((a) => a.costoPorFtdCOP !== null);
+  const estrellaCosto = conCosto.slice().sort((a, b) => (a.costoPorFtdCOP as number) - (b.costoPorFtdCOP as number))[0] ?? null;
 
   res.setHeader("Cache-Control", "no-store");
   return res.status(200).json({
@@ -136,6 +145,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     productos,
     estrellaFtd,
     estrellaVentas,
+    estrellaCosto,
     necesitaAtencion,
     actualizado: new Date().toISOString(),
     filtro: { desde: desde || null, hasta: hasta || null },

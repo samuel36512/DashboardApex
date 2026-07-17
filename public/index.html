@@ -1631,6 +1631,13 @@
         el("div", { class: "spotlight-value", text: currency.format(data.estrellaVentas.ventasUSD) }),
       ]));
     }
+    if (data.estrellaCosto && data.estrellaCosto.costoPorFtdCOP !== null) {
+      spotlights.appendChild(el("div", { class: "spotlight-card star" }, [
+        el("div", { class: "spotlight-kicker", text: "🎯 Estrella en costo por FTD" }),
+        el("div", { class: "spotlight-name", text: data.estrellaCosto.agente }),
+        el("div", { class: "spotlight-value", text: currencyCOP.format(data.estrellaCosto.costoPorFtdCOP) + " / FTD" }),
+      ]));
+    }
     if (data.necesitaAtencion && data.necesitaAtencion.ftds === 0 && data.necesitaAtencion.ventasUSD === 0) {
       spotlights.appendChild(el("div", { class: "spotlight-card warning" }, [
         el("div", { class: "spotlight-kicker", text: "⚠️ Necesita atención" }),
