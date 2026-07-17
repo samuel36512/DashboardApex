@@ -127,6 +127,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     Accept: "application/json",
   };
 
+  if (req.query.cutoff === "1") {
+    const supabase = getSupabase();
+    const { data: cutoffRow } = await supabase
+      .from("sync_state")
+      .select("value")
+      .eq("key", "registro_ftd_cutoff")
+      .maybeSingle();
+    return res.status(200).json({ registro_ftd_cutoff: cutoffRow?.value ?? null });
+  }
+
   // Lista los custom fields configurados en el location, para identificar
   // si existe alguno tipo "ID de broker"/"cuenta" y con que id/fieldKey se
   // guarda (necesario para despues poder leer su valor en cada contacto).
