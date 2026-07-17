@@ -1340,10 +1340,7 @@
     var content = el("div");
 
     if (currentRol === "director") {
-      var agentes = Array.prototype.concat.call([], data.registros || [], data.ftds || [])
-        .map(function (f) { return f.agente; })
-        .filter(function (a, i, arr) { return arr.indexOf(a) === i; })
-        .sort();
+      var agentes = data.agentesActivos || [];
       var select = el("select", { class: "agente-select" }, [el("option", { value: "", text: "Todos los agentes" })]);
       agentes.forEach(function (a) {
         select.appendChild(el("option", { value: a, text: a }));

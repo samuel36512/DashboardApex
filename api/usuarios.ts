@@ -72,11 +72,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const [registros, ftds] = await Promise.all([traer("registro"), traer("ftd")]);
+
+    // La lista de agentes para el filtro tiene que ser el roster completo,
+    // no solo los que tienen actividad en el rango filtrado - si no, con un
+    // rango angosto el selector muestra solo un puñado de agentes.
+    let agentesActivos: string[] = [];
+    if (rol === "director") {
+      const { data: agentesRows, error: agentesError } = await supabase
+        .from("agentes")
+        .select("nombre")
+        .eq("activo", true)
+        .order("nombre");
+      if (agentesError) throw new Error(`Error leyendo agentes: ${agentesError.message}`);
+      agentesActivos = (agentesRows ?? []).map((a) => a.nombre);
+    }
+
     res.setHeader("Cache-Control", "no-store");
     return res.status(200).json({
       registros,
       ftds,
       rol,
+      agentesActivos,
       actualizado: new Date().toISOString(),
       filtro: { desde: desde || null, hasta: hasta || null },
     });
