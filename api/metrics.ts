@@ -9,6 +9,32 @@ interface AgentAgg {
   comisionUSD: number;
 }
 
+// Categoria de pauta por agente (ejecutivo/junior), confirmada por el
+// director - define cuanto se le invierte por dia en publicidad. Los
+// agentes activos que no aparecen aca todavia no tienen categoria
+// asignada, asi que quedan afuera del calculo de costo por FTD.
+const AGENTE_TIER: Record<string, "ejecutivo" | "junior"> = {
+  "Angela Galindez": "ejecutivo",
+  "Fernando Sandoval": "ejecutivo",
+  "Henry Andrés Correa": "ejecutivo",
+  "Jhon Camacho": "ejecutivo",
+  "Juanita Sánchez": "ejecutivo",
+  "Luis Gómez": "ejecutivo",
+  "Nicolás Correa": "ejecutivo",
+  "Sergio Gallo": "junior",
+  "Santiago Charry": "junior",
+  "María Paula Guevara": "junior",
+  "Luna Sandoval": "junior",
+  "Luis Felipe Charry": "junior",
+  "Juan Ceballos": "junior",
+  "Gabriel Alejandro Monteverde": "junior",
+  "Diego Alejandro Mora": "junior",
+  "Daniela Charry": "junior",
+  "Ana Sánchez": "junior",
+};
+const TASA_EJECUTIVO_COP = Number(process.env.TASA_PAUTA_EJECUTIVO_COP ?? 100000);
+const TASA_JUNIOR_COP = Number(process.env.TASA_PAUTA_JUNIOR_COP ?? 50000);
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
@@ -121,6 +147,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!page || page.length < PAGE) break;
   }
 
+  // Costo por FTD: SIEMPRE del mes en curso (hora Colombia, UTC-5),
+  // independiente del filtro de fecha activo en la pantalla - la pauta se
+  // paga por dia calendario, no tiene sentido mezclarlo con "Todo" o un
+  // rango personalizado. FTD incluye el historico sembrado a mano (ya
+  // viene atribuido a un agente puntual), es el total real del mes.
+  const ahoraCo = new Date(Date.now() - 5 * 60 * 60 * 1000);
+  const diaDelMes = ahoraCo.getUTCDate();
+  const desdeMesCo = new Date(
+    Date.UTC(ahoraCo.getUTCFullYear(), ahoraCo.getUTCMonth(), 1, 5, 0, 0)
+  ).toISOString();
+  const ftdsMesPorAgente = new Map<string, number>();
+  for (let offset = 0; ; offset += PAGE) {
+    const { data: page, error } = await supabase
+      .from("eventos")
+      .select("agente")
+      .eq("tipo", "ftd")
+      .gte("fecha", desdeMesCo)
+      .range(offset, offset + PAGE - 1);
+    if (error) {
+      return res.status(500).json({ error: "Error leyendo FTD del mes" });
+    }
+    for (const row of page ?? []) {
+      ftdsMesPorAgente.set(row.agente, (ftdsMesPorAgente.get(row.agente) ?? 0) + 1);
+    }
+    if (!page || page.length < PAGE) break;
+  }
+
   const pct = (num: number, den: number) => (den > 0 ? Math.round((num / den) * 10000) / 100 : 0);
 
   // Estimado de "mejores pagos": comision de ventas ya ganada + un bono
@@ -129,21 +182,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const comisionPorFtd = Number(process.env.COMISION_POR_FTD_USD ?? 8);
 
   const agentes = Array.from(byAgent.entries())
-    .map(([agente, a]) => ({
-      agente,
-      leads: a.leads,
-      registros: a.registros,
-      ftds: a.ftds,
-      ventasUSD: a.ventasUSD,
-      comisionUSD: a.comisionUSD,
-      gananciaEstimadaUSD: a.comisionUSD + a.ftds * comisionPorFtd,
-      conversionesRecientes: conversionesRecientes.get(agente) || [],
-      conversion: {
-        leadToRegistro: pct(a.registros, a.leads),
-        registroToFtd: pct(a.ftds, a.registros),
-        leadToFtd: pct(a.ftds, a.leads),
-      },
-    }))
+    .map(([agente, a]) => {
+      const tier = AGENTE_TIER[agente];
+      const ftdsMes = ftdsMesPorAgente.get(agente) ?? 0;
+      const gastoPautaCOP = tier ? (tier === "ejecutivo" ? TASA_EJECUTIVO_COP : TASA_JUNIOR_COP) * diaDelMes : null;
+      const costoPorFtdCOP = gastoPautaCOP !== null && ftdsMes > 0 ? Math.round(gastoPautaCOP / ftdsMes) : null;
+      return {
+        agente,
+        leads: a.leads,
+        registros: a.registros,
+        ftds: a.ftds,
+        ventasUSD: a.ventasUSD,
+        comisionUSD: a.comisionUSD,
+        tier: tier ?? null,
+        ftdsMes,
+        gastoPautaCOP,
+        costoPorFtdCOP,
+        gananciaEstimadaUSD: a.comisionUSD + a.ftds * comisionPorFtd,
+        conversionesRecientes: conversionesRecientes.get(agente) || [],
+        conversion: {
+          leadToRegistro: pct(a.registros, a.leads),
+          registroToFtd: pct(a.ftds, a.registros),
+          leadToFtd: pct(a.ftds, a.leads),
+        },
+      };
+    })
     .sort((a, b) => a.agente.localeCompare(b.agente));
 
   const rol = (perfil as any).rol as string;

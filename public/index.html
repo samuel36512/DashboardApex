@@ -436,6 +436,65 @@
   }
   .spotlight-card.warning .spotlight-value { color: var(--danger); }
 
+  /* ---- Costo por FTD ---- */
+  .cost-row {
+    display: grid;
+    grid-template-columns: 30px 1fr auto auto;
+    align-items: center;
+    gap: 14px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--gridline);
+  }
+  .cost-row:last-child { border-bottom: none; }
+  .cost-rank {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--gridline);
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .cost-row.best .cost-rank { background: var(--good); color: #0a0908; }
+  .cost-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .cost-tier {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-top: 2px;
+  }
+  .cost-tier.ejecutivo { color: var(--series-1); }
+  .cost-tier.junior { color: var(--text-muted); }
+  .cost-detail {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    font-size: 11px;
+    color: var(--text-muted);
+    text-align: right;
+    gap: 2px;
+    white-space: nowrap;
+  }
+  .cost-value {
+    font-size: 15px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+    min-width: 110px;
+    text-align: right;
+  }
+  .cost-row.best .cost-value { color: var(--good); }
+
   /* ---- Table ---- */
   table {
     width: 100%;
@@ -810,6 +869,7 @@
 
   var currency = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
   var currencyPrecise = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
+  var currencyCOP = new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 });
 
   function el(tag, attrs, children) {
     var node = document.createElement(tag);
@@ -1295,6 +1355,37 @@
     tableCard.appendChild(el("div", { class: "section-title", text: "Detalle por agente" }));
     tableCard.appendChild(table);
     content.appendChild(el("section", {}, [tableCard]));
+
+    var conCosto = agentes.filter(function (a) { return a.tier; });
+    if (conCosto.length > 0) {
+      var ordenadosCosto = conCosto.slice().sort(function (a, b) {
+        var ca = a.costoPorFtdCOP === null ? Infinity : a.costoPorFtdCOP;
+        var cb = b.costoPorFtdCOP === null ? Infinity : b.costoPorFtdCOP;
+        return ca - cb;
+      });
+      var costoCard = el("div", { class: "card" });
+      costoCard.appendChild(el("div", { class: "section-title", text: "Costo por FTD" }));
+      costoCard.appendChild(el("div", {
+        class: "section-desc",
+        text: "Pauta invertida este mes ÷ FTD convertidos este mes. De mejor (más barato) a peor.",
+      }));
+      ordenadosCosto.forEach(function (a, i) {
+        var esMejor = i === 0 && a.costoPorFtdCOP !== null;
+        costoCard.appendChild(el("div", { class: "cost-row" + (esMejor ? " best" : "") }, [
+          el("div", { class: "cost-rank", text: String(i + 1) }),
+          el("div", {}, [
+            el("div", { class: "cost-name", text: a.agente, title: a.agente }),
+            el("div", { class: "cost-tier " + a.tier, text: a.tier === "ejecutivo" ? "Ejecutivo" : "Junior" }),
+          ]),
+          el("div", { class: "cost-detail" }, [
+            el("span", { text: a.ftdsMes + (a.ftdsMes === 1 ? " FTD" : " FTDs") + " este mes" }),
+            el("span", { text: currencyCOP.format(a.gastoPautaCOP || 0) + " invertidos" }),
+          ]),
+          el("div", { class: "cost-value", text: a.costoPorFtdCOP !== null ? currencyCOP.format(a.costoPorFtdCOP) : "Sin FTD" }),
+        ]));
+      });
+      content.appendChild(el("section", {}, [costoCard]));
+    }
 
     renderContentState(content);
 
