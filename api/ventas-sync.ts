@@ -128,11 +128,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const credsJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
   const sheetId = process.env.VENTAS_SHEET_ID;
-  const directorEmail = process.env.DIRECTOR_EMAIL;
-  if (!credsJson || !sheetId || !directorEmail) {
-    return res.status(500).json({ error: "Faltan GOOGLE_SERVICE_ACCOUNT_JSON, VENTAS_SHEET_ID o DIRECTOR_EMAIL en Vercel" });
+  if (!credsJson || !sheetId) {
+    return res.status(500).json({ error: "Faltan GOOGLE_SERVICE_ACCOUNT_JSON o VENTAS_SHEET_ID en Vercel" });
   }
-  const directorEmailNorm = normalizar(directorEmail);
 
   const supabase = getSupabase();
 
@@ -169,7 +167,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const noReconocidos = new Set<string>();
     let ultimaFechaValida = "";
     let sinFecha = 0;
-    let comisionDirectorMes = 0;
 
     for (let i = headerIdx + 2; i < filas.length; i++) {
       const fila = filas[i];
@@ -181,20 +178,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const precioCrudo = (fila[4] || "").toString().trim();
       const agenteSheet = (fila[6] || "").toString().trim();
       const comisionCruda = (fila[7] || "").toString().trim();
-      const directorSheet = (fila[8] || "").toString().trim();
-      const comisionDirectorCruda = (fila[9] || "").toString().trim();
 
-      if (!cliente || !precioCrudo) continue;
-
-      // La comision de director se suma independiente de si el agente de la
-      // fila esta en nuestro roster - es un total mensual aparte, y solo se
-      // toca si la columna DIRECTOR coincide exactamente con el director
-      // configurado (las de otros directores ni se leen para nada mas).
-      if (directorSheet && normalizar(directorSheet) === directorEmailNorm) {
-        comisionDirectorMes += parsePrecio(comisionDirectorCruda);
-      }
-
-      if (!agenteSheet) continue;
+      if (!cliente || !precioCrudo || !agenteSheet) continue;
 
       // Google Sheets devuelve "" en filas con la fecha visualmente
       // combinada con la de arriba - se arrastra la ultima fecha valida
@@ -237,15 +222,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    const mesKey = `${ahora.getFullYear()}-${String(ahora.getMonth() + 1).padStart(2, "0")}`;
-    const { error: comisionError } = await supabase
-      .from("sync_state")
-      .upsert({
-        key: `comision_director_${mesKey}`,
-        value: { total: comisionDirectorMes, pestana: tabName, actualizado: new Date().toISOString() },
-      });
-    if (comisionError) throw new Error(`Error guardando comision de director: ${comisionError.message}`);
-
     res.setHeader("Cache-Control", "no-store");
     return res.status(200).json({
       ok: true,
@@ -254,7 +230,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ventasGuardadas: rowsVenta.length,
       sinFecha,
       agentesNoReconocidos: Array.from(noReconocidos),
-      comisionDirectorMes,
     });
   } catch (err: any) {
     return res.status(502).json({ error: err?.message || "Error sincronizando ventas" });

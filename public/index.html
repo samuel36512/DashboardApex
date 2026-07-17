@@ -398,6 +398,44 @@
     margin-top: 8px;
   }
 
+  .spotlight-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 14px;
+  }
+  .spotlight-card {
+    border-radius: 14px;
+    padding: 16px;
+    border: 1px solid var(--border);
+  }
+  .spotlight-card.star {
+    background: linear-gradient(160deg, var(--series-1-soft), var(--surface-1));
+  }
+  .spotlight-card.warning {
+    background: linear-gradient(160deg, rgba(229,72,77,0.16), var(--surface-1));
+    border-color: rgba(229,72,77,0.35);
+  }
+  .spotlight-kicker {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 10px;
+  }
+  .spotlight-name {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .spotlight-value {
+    font-size: 13px;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+  }
+  .spotlight-card.warning .spotlight-value { color: var(--danger); }
+
   /* ---- Table ---- */
   table {
     width: 100%;
@@ -1414,9 +1452,10 @@
       el("div", { class: "dh-total", text: currencyPrecise.format(data.totalUSD || 0) }),
     ]);
 
+    var tasaVentasPct = Math.round((data.tasaComisionVentas || 0.15) * 100);
     var stats = el("div", { class: "dh-stats" }, [
       el("div", { class: "dh-stat" }, [
-        el("span", { class: "dh-stat-label", text: "Comisión de ventas" }),
+        el("span", { class: "dh-stat-label", text: "Comisión de ventas (" + tasaVentasPct + "%)" }),
         el("span", { class: "dh-stat-value", text: currencyPrecise.format(data.comisionVentasUSD || 0) }),
       ]),
       el("div", { class: "dh-stat" }, [
@@ -1445,6 +1484,42 @@
     hero.appendChild(progressWrap);
 
     content.appendChild(el("section", {}, [hero]));
+
+    var overviewTiles = el("div", { class: "tiles" }, [
+      statTile("Facturación del equipo", currency.format(data.facturacionEquipoUSD || 0), "Este mes"),
+      statTile("FTD del equipo", (data.teamFtds || 0).toLocaleString("en-US"), "Este mes"),
+    ]);
+    content.appendChild(overviewTiles);
+
+    var spotlights = el("div", { class: "spotlight-grid" });
+    if (data.estrellaFtd && data.estrellaFtd.ftds > 0) {
+      spotlights.appendChild(el("div", { class: "spotlight-card star" }, [
+        el("div", { class: "spotlight-kicker", text: "🌟 Estrella en FTD" }),
+        el("div", { class: "spotlight-name", text: data.estrellaFtd.agente }),
+        el("div", { class: "spotlight-value", text: data.estrellaFtd.ftds + (data.estrellaFtd.ftds === 1 ? " FTD" : " FTDs") }),
+      ]));
+    }
+    if (data.estrellaVentas && data.estrellaVentas.ventasUSD > 0) {
+      spotlights.appendChild(el("div", { class: "spotlight-card star" }, [
+        el("div", { class: "spotlight-kicker", text: "💰 Estrella en ventas" }),
+        el("div", { class: "spotlight-name", text: data.estrellaVentas.agente }),
+        el("div", { class: "spotlight-value", text: currency.format(data.estrellaVentas.ventasUSD) }),
+      ]));
+    }
+    if (data.necesitaAtencion && data.necesitaAtencion.ftds === 0 && data.necesitaAtencion.ventasUSD === 0) {
+      spotlights.appendChild(el("div", { class: "spotlight-card warning" }, [
+        el("div", { class: "spotlight-kicker", text: "⚠️ Necesita atención" }),
+        el("div", { class: "spotlight-name", text: data.necesitaAtencion.agente }),
+        el("div", { class: "spotlight-value", text: "Sin FTD ni ventas este mes" }),
+      ]));
+    }
+    if (spotlights.children.length > 0) {
+      var spotlightCard = el("div", { class: "card" });
+      spotlightCard.appendChild(el("div", { class: "section-title", text: "Resumen del equipo" }));
+      spotlightCard.appendChild(spotlights);
+      content.appendChild(el("section", {}, [spotlightCard]));
+    }
+
     renderContentState(content);
     document.getElementById("updated-label").textContent =
       "Actualizado " + new Date(data.actualizado || Date.now()).toLocaleTimeString("es-419", { hour: "2-digit", minute: "2-digit" });
