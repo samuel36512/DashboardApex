@@ -779,6 +779,20 @@
     return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
   }
 
+  // Convierte una fecha "YYYY-MM-DD" (dia calendario en la zona horaria
+  // local del navegador) al instante UTC exacto de su inicio/fin, para
+  // mandarle al backend un limite preciso en vez de una fecha ambigua - si
+  // no, un filtro de "hoy" en Colombia (UTC-5) puede dejar afuera actividad
+  // de la noche que en UTC ya cayo en el dia siguiente.
+  function localDayStartIso(fechaStr) {
+    var p = fechaStr.split("-");
+    return new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]), 0, 0, 0, 0).toISOString();
+  }
+  function localDayEndIso(fechaStr) {
+    var p = fechaStr.split("-");
+    return new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]), 23, 59, 59, 999).toISOString();
+  }
+
   var DATE_PRESETS = [
     { id: "todo", label: "Todo", range: function () { return { desde: null, hasta: null }; } },
     { id: "hoy", label: "Hoy", range: function () { var t = fmtDate(new Date()); return { desde: t, hasta: t }; } },
@@ -1368,9 +1382,9 @@
     var endpoint = currentView === "usuarios" ? "/usuarios" : "/metrics";
     var qs = "";
     if (currentView === "dashboard" && currentDesde && currentHasta) {
-      qs = "?desde=" + encodeURIComponent(currentDesde) + "&hasta=" + encodeURIComponent(currentHasta);
+      qs = "?desde=" + encodeURIComponent(localDayStartIso(currentDesde)) + "&hasta=" + encodeURIComponent(localDayEndIso(currentHasta));
     } else if (currentView === "usuarios" && usuariosDesde && usuariosHasta) {
-      qs = "?desde=" + encodeURIComponent(usuariosDesde) + "&hasta=" + encodeURIComponent(usuariosHasta);
+      qs = "?desde=" + encodeURIComponent(localDayStartIso(usuariosDesde)) + "&hasta=" + encodeURIComponent(localDayEndIso(usuariosHasta));
     }
 
     fetch(endpoint + qs, { headers: { Authorization: "Bearer " + accessToken } })

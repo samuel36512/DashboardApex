@@ -63,8 +63,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const PAGE = 1000;
   for (let offset = 0; ; offset += PAGE) {
     let query = supabase.from("eventos").select("agente, tipo, monto").range(offset, offset + PAGE - 1);
+    // desde/hasta vienen del front como instante UTC completo (ya resuelto
+    // desde el dia calendario LOCAL del director, no UTC) - si llegan como
+    // fecha simple "YYYY-MM-DD" (uso directo de la API, sin el front), se
+    // completa con el fin del dia en UTC como venia haciendose antes.
     if (desde) query = query.gte("fecha", desde);
-    if (hasta) query = query.lte("fecha", `${hasta}T23:59:59.999Z`);
+    if (hasta) query = query.lte("fecha", hasta.includes("T") ? hasta : `${hasta}T23:59:59.999Z`);
 
     const { data: page, error } = await query;
     if (error) {
