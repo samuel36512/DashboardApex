@@ -150,8 +150,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // Membresias vendidas este mes por agente (para "Estado critico" en la
-  // alerta de inactividad) - los productos "BOT..." son un servicio
-  // aparte, no cuentan como membresia segun el director.
+  // alerta de inactividad) - solo se excluyen los productos "BOT ... IA"
+  // (ej. "BOT TRON IA 45 Dias"), que no cuentan como membresia segun el
+  // director. Otros bots (GOTRADERS, GOPRO, GOLD, etc.) SI cuentan, asi que
+  // se compara por palabra completa (no substring) para no confundir
+  // "VITALICIA" con "IA".
   const membresiasMesPorAgente = new Map<string, number>();
   for (let offset = 0; ; offset += PAGE) {
     const { data: page, error } = await supabase
@@ -164,8 +167,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(500).json({ error: "Error leyendo ventas del mes" });
     }
     for (const row of page ?? []) {
-      const producto = (row.producto || "").toLowerCase();
-      if (producto.includes("bot")) continue;
+      const palabras = (row.producto || "").toUpperCase().split(/\s+/);
+      const esBotIa = palabras.includes("BOT") && palabras.includes("IA");
+      if (esBotIa) continue;
       membresiasMesPorAgente.set(row.agente, (membresiasMesPorAgente.get(row.agente) ?? 0) + 1);
     }
     if (!page || page.length < PAGE) break;
