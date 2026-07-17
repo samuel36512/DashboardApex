@@ -524,10 +524,10 @@
 
   /* ---- Usuarios (registro / FTD) ---- */
   .user-table-wrap { overflow-x: auto; }
-  .user-table { width: 100%; min-width: 480px; }
+  .user-table { width: 100%; min-width: 640px; }
   .user-row {
     display: grid;
-    grid-template-columns: 1.6fr 1.4fr 1.1fr 0.9fr;
+    grid-template-columns: 1.5fr 1.1fr 1.4fr 1.1fr 0.9fr;
     gap: 12px;
     align-items: center;
     padding: 9px 0;
@@ -544,6 +544,7 @@
     border-bottom: 1px solid var(--gridline);
   }
   .user-row .user-id { font-family: monospace; font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .user-row .user-telefono { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
   .user-row .user-nombre { font-weight: 600; }
   .user-row .user-nombre.sin-nombre { color: var(--text-muted); font-weight: 400; font-style: italic; }
   .user-row .user-fecha { font-size: 12px; color: var(--text-muted); text-align: right; }
@@ -1251,6 +1252,7 @@
     var table = el("div", { class: "user-table" });
     table.appendChild(el("div", { class: "user-row header" }, [
       el("div", { text: "Nombre" }),
+      el("div", { text: "Teléfono" }),
       el("div", { text: "ID de usuario" }),
       el("div", { text: "Agente" }),
       el("div", { text: "Fecha" }),
@@ -1258,6 +1260,7 @@
     filas.forEach(function (f) {
       table.appendChild(el("div", { class: "user-row" }, [
         el("div", { class: "user-nombre" + (f.nombre ? "" : " sin-nombre"), text: f.nombre || "(nombre no disponible aún)" }),
+        el("div", { class: "user-telefono", text: f.telefono || "—" }),
         el("div", { class: "user-id", text: f.contactoId }),
         el("div", { text: f.agente }),
         el("div", { class: "user-fecha", text: fmtFechaHora(f.fecha) }),

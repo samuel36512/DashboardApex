@@ -41,20 +41,33 @@ interface EventoRow {
   tipo: "lead" | "registro" | "ftd";
   fecha: string;
   contacto_nombre?: string | null;
+  contacto_telefono?: string | null;
 }
 
-// Trae el nombre del contacto desde GHL. Se usa tanto para las filas nuevas
-// de registro/ftd como para el backfill de las que quedaron sin nombre.
-async function fetchContactName(headers: Record<string, string>, contactId: string): Promise<string | null> {
+interface ContactDetails {
+  // found=false: no se pudo consultar el contacto (falla de red/HTTP) y hay
+  // que reintentar en una corrida futura. found=true: se consulto bien, y
+  // nombre/telefono ya reflejan el valor real aunque venga vacio (asi no se
+  // reintenta para siempre un contacto que genuinamente no tiene telefono).
+  found: boolean;
+  nombre: string;
+  telefono: string;
+}
+
+// Trae el nombre y telefono del contacto desde GHL. Se usa tanto para las
+// filas nuevas de registro/ftd como para el backfill de las que quedaron
+// incompletas.
+async function fetchContactDetails(headers: Record<string, string>, contactId: string): Promise<ContactDetails> {
   try {
     const r = await fetchWithTimeout(`${GHL_BASE}/contacts/${contactId}`, { headers });
-    if (!r.ok) return null;
+    if (!r.ok) return { found: false, nombre: "", telefono: "" };
     const data: any = await r.json();
     const c = data?.contact;
-    if (!c) return null;
-    return c.contactName || `${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() || null;
+    if (!c) return { found: false, nombre: "", telefono: "" };
+    const nombre = c.contactName || `${c.firstName ?? ""} ${c.lastName ?? ""}`.trim();
+    return { found: true, nombre, telefono: c.phone || "" };
   } catch {
-    return null;
+    return { found: false, nombre: "", telefono: "" };
   }
 }
 
@@ -144,17 +157,20 @@ async function cargarEtapaPipeline(
     startAfterId = meta.startAfterId;
   }
 
-  // El nombre del contacto solo se puede obtener con una llamada aparte
-  // (opportunities/search no lo trae), asi que se busca solo para las filas
-  // nuevas de esta corrida, en lotes chicos y respetando el tiempo que queda
-  // del cron - si se agota, esas filas quedan sin nombre y el backfill
-  // oportunista de mas adelante las completa en una corrida futura.
+  // El nombre y telefono del contacto solo se pueden obtener con una llamada
+  // aparte (opportunities/search no los trae), asi que se buscan solo para
+  // las filas nuevas de esta corrida, en lotes chicos y respetando el tiempo
+  // que queda del cron - si se agota, esas filas quedan incompletas y el
+  // backfill oportunista de mas adelante las completa en una corrida futura.
   const NAME_BATCH = 8;
   for (let i = 0; i < rows.length && timeLeft(started) > 5000; i += NAME_BATCH) {
     const lote = rows.slice(i, i + NAME_BATCH);
     await Promise.all(
       lote.map(async (row) => {
-        row.contacto_nombre = await fetchContactName(headers, row.contacto_id);
+        const detalles = await fetchContactDetails(headers, row.contacto_id);
+        if (!detalles.found) return; // se completa en el backfill de una corrida futura
+        row.contacto_nombre = detalles.nombre;
+        row.contacto_telefono = detalles.telefono;
       })
     );
   }
@@ -162,9 +178,9 @@ async function cargarEtapaPipeline(
   return { rows, revisadas, sinDueno };
 }
 
-// Completa el nombre de contactos de filas viejas de registro/ftd que
-// quedaron sin nombre (guardadas antes de este panel, o cuyo fetch fallo en
-// su momento). Se procesa en lotes chicos por corrida para no competir por
+// Completa nombre/telefono de filas viejas de registro/ftd que quedaron
+// incompletas (guardadas antes de este panel, o cuyo fetch fallo en su
+// momento). Se procesa en lotes chicos por corrida para no competir por
 // tiempo con el resto del sync - con el cron corriendo periodicamente, se
 // termina de completar solo en unas pocas corridas.
 async function backfillNombres(headers: Record<string, string>, supabase: Supabase, started: number) {
@@ -174,7 +190,7 @@ async function backfillNombres(headers: Record<string, string>, supabase: Supaba
     .from("eventos")
     .select("id, contacto_id")
     .in("tipo", ["registro", "ftd"])
-    .is("contacto_nombre", null)
+    .or("contacto_nombre.is.null,contacto_telefono.is.null")
     .not("contacto_id", "like", "baseline-%")
     .limit(20);
   if (!faltantes || faltantes.length === 0) return { actualizados: 0 };
@@ -185,9 +201,12 @@ async function backfillNombres(headers: Record<string, string>, supabase: Supaba
     const lote = faltantes.slice(i, i + NAME_BATCH);
     await Promise.all(
       lote.map(async (fila) => {
-        const nombre = await fetchContactName(headers, fila.contacto_id);
-        if (!nombre) return;
-        const { error } = await supabase.from("eventos").update({ contacto_nombre: nombre }).eq("id", fila.id);
+        const detalles = await fetchContactDetails(headers, fila.contacto_id);
+        if (!detalles.found) return; // se reintenta en una corrida futura
+        const { error } = await supabase
+          .from("eventos")
+          .update({ contacto_nombre: detalles.nombre, contacto_telefono: detalles.telefono })
+          .eq("id", fila.id);
         if (!error) actualizados++;
       })
     );

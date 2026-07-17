@@ -5,6 +5,7 @@ create table if not exists eventos (
   tipo text not null check (tipo in ('lead', 'registro', 'ftd', 'venta')),
   monto numeric,
   contacto_nombre text,
+  contacto_telefono text,
   fecha timestamptz not null,
   creado_en timestamptz not null default now(),
   unique (contacto_id, tipo)
@@ -12,6 +13,7 @@ create table if not exists eventos (
 
 -- Si la tabla ya existia antes de agregar el panel de usuarios registrados/FTD:
 alter table eventos add column if not exists contacto_nombre text;
+alter table eventos add column if not exists contacto_telefono text;
 
 create index if not exists idx_eventos_agente on eventos (agente);
 create index if not exists idx_eventos_tipo on eventos (tipo);

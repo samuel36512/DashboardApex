@@ -40,7 +40,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // que se pueda mostrar en este panel.
     let query = supabase
       .from("eventos")
-      .select("contacto_id, contacto_nombre, agente, fecha")
+      .select("contacto_id, contacto_nombre, contacto_telefono, agente, fecha")
       .eq("tipo", tipo)
       .not("contacto_id", "like", "baseline-%")
       .order("fecha", { ascending: false })
@@ -52,6 +52,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return (data ?? []).map((r) => ({
       contactoId: r.contacto_id,
       nombre: r.contacto_nombre || null,
+      telefono: r.contacto_telefono || null,
       agente: r.agente,
       fecha: r.fecha,
     }));
