@@ -797,16 +797,6 @@
     { id: "todo", label: "Todo", range: function () { return { desde: null, hasta: null }; } },
     { id: "hoy", label: "Hoy", range: function () { var t = fmtDate(new Date()); return { desde: t, hasta: t }; } },
     {
-      id: "7dias",
-      label: "Últimos 7 días",
-      range: function () {
-        var hoy = new Date();
-        var hace7 = new Date();
-        hace7.setDate(hoy.getDate() - 6);
-        return { desde: fmtDate(hace7), hasta: fmtDate(hoy) };
-      },
-    },
-    {
       id: "mes",
       label: "Este mes",
       range: function () {
@@ -867,6 +857,27 @@
         filterRow.appendChild(btn);
       });
       app.appendChild(filterRow);
+
+      var desdeInput = el("input", { type: "date", class: "range-input", value: currentDesde || "" });
+      var hastaInput = el("input", { type: "date", class: "range-input", value: currentHasta || "" });
+      var aplicarBtn = el("button", { class: "btn", text: "Aplicar" });
+      aplicarBtn.addEventListener("click", function () {
+        if (!desdeInput.value || !hastaInput.value) return;
+        currentPreset = "custom";
+        currentDesde = desdeInput.value;
+        currentHasta = hastaInput.value > desdeInput.value ? hastaInput.value : desdeInput.value;
+        Array.prototype.forEach.call(filterRow.querySelectorAll(".filter-pill"), function (b) {
+          b.classList.remove("active");
+        });
+        loadMetrics(true, currentAccessToken);
+      });
+      app.appendChild(el("div", { class: "range-row" + (currentPreset === "custom" ? " active" : "") }, [
+        el("span", { class: "range-label", text: "Rango personalizado:" }),
+        desdeInput,
+        el("span", { text: "→" }),
+        hastaInput,
+        aplicarBtn,
+      ]));
     }
 
     var content = el("div", { id: "content" });
