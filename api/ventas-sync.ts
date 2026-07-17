@@ -163,7 +163,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(502).json({ error: `No encontre la fila de encabezado ("FECHA"/"AGENTE") en la pestaña "${tabName}"` });
     }
 
-    const rowsVenta: { contacto_id: string; agente: string; tipo: "venta"; monto: number; comision: number; fecha: string }[] = [];
+    const rowsVenta: { contacto_id: string; agente: string; tipo: "venta"; monto: number; comision: number; producto: string; fecha: string }[] = [];
     const noReconocidos = new Set<string>();
     let ultimaFechaValida = "";
     let sinFecha = 0;
@@ -208,6 +208,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         tipo: "venta",
         monto: parsePrecio(precioCrudo),
         comision: parsePrecio(comisionCruda),
+        producto: producto || "Sin especificar",
         fecha: fechaIso,
       });
     }

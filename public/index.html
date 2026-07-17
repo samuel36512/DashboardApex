@@ -1520,6 +1520,26 @@
       content.appendChild(el("section", {}, [spotlightCard]));
     }
 
+    if (data.productos && data.productos.length > 0) {
+      var maxCantidad = data.productos.reduce(function (m, p) { return Math.max(m, p.cantidad); }, 0);
+      var productosCard = el("div", { class: "card" });
+      productosCard.appendChild(el("div", { class: "section-title", text: "Ventas por producto" }));
+      productosCard.appendChild(el("div", { class: "section-desc", text: "Unidades vendidas de cada membresía/producto este mes." }));
+      data.productos.forEach(function (p) {
+        var widthPct = maxCantidad ? Math.max(4, (p.cantidad / maxCantidad) * 100) : 0;
+        productosCard.appendChild(el("div", { class: "bar-row" }, [
+          el("div", { class: "agente-name", text: p.producto, title: p.producto }),
+          el("div", { class: "bar-track" }, [
+            el("div", { class: "bar-fill", style: "width:" + widthPct + "%" }),
+          ]),
+          el("div", { class: "amount" }, [
+            el("span", { text: p.cantidad + (p.cantidad === 1 ? " venta" : " ventas") }),
+          ]),
+        ]));
+      });
+      content.appendChild(el("section", {}, [productosCard]));
+    }
+
     renderContentState(content);
     document.getElementById("updated-label").textContent =
       "Actualizado " + new Date(data.actualizado || Date.now()).toLocaleTimeString("es-419", { hour: "2-digit", minute: "2-digit" });

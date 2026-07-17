@@ -7,6 +7,7 @@ create table if not exists eventos (
   contacto_nombre text,
   contacto_telefono text,
   comision numeric,
+  producto text,
   fecha timestamptz not null,
   creado_en timestamptz not null default now(),
   unique (contacto_id, tipo)
@@ -17,6 +18,8 @@ alter table eventos add column if not exists contacto_nombre text;
 alter table eventos add column if not exists contacto_telefono text;
 -- Comision del agente por venta (columna "Comisión" del sheet de ventas), para Ventas del equipo:
 alter table eventos add column if not exists comision numeric;
+-- Nombre del producto vendido (columna "PRODUCTO" del sheet), para el desglose por producto en Pago de directores:
+alter table eventos add column if not exists producto text;
 
 create index if not exists idx_eventos_agente on eventos (agente);
 create index if not exists idx_eventos_tipo on eventos (tipo);

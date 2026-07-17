@@ -56,16 +56,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   const byAgent = new Map<string, { ftds: number; ventasUSD: number }>();
   for (const a of agentesRows ?? []) byAgent.set(a.nombre, { ftds: 0, ventasUSD: 0 });
+  const byProducto = new Map<string, { cantidad: number; ventasUSD: number }>();
 
-  // FTD y facturacion del equipo en el rango, desglosados por agente en una
-  // sola pasada. FTD incluye TODO (tambien el historico sembrado a mano)
-  // porque esto es un total real del mes, no un listado contacto por
-  // contacto como en "Registros y FTD".
+  // FTD y facturacion del equipo en el rango, desglosados por agente y por
+  // producto en una sola pasada. FTD incluye TODO (tambien el historico
+  // sembrado a mano) porque esto es un total real del mes, no un listado
+  // contacto por contacto como en "Registros y FTD".
   const PAGE = 1000;
   for (let offset = 0; ; offset += PAGE) {
     let query = supabase
       .from("eventos")
-      .select("agente, tipo, monto")
+      .select("agente, tipo, monto, producto")
       .in("tipo", ["ftd", "venta"])
       .range(offset, offset + PAGE - 1);
     if (desde) query = query.gte("fecha", desde);
@@ -78,10 +79,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!byAgent.has(row.agente)) byAgent.set(row.agente, { ftds: 0, ventasUSD: 0 });
       const agg = byAgent.get(row.agente)!;
       if (row.tipo === "ftd") agg.ftds++;
-      else if (row.tipo === "venta") agg.ventasUSD += Number(row.monto ?? 0);
+      else if (row.tipo === "venta") {
+        agg.ventasUSD += Number(row.monto ?? 0);
+        const producto = row.producto || "Sin especificar";
+        if (!byProducto.has(producto)) byProducto.set(producto, { cantidad: 0, ventasUSD: 0 });
+        const prodAgg = byProducto.get(producto)!;
+        prodAgg.cantidad++;
+        prodAgg.ventasUSD += Number(row.monto ?? 0);
+      }
     }
     if (!page || page.length < PAGE) break;
   }
+
+  const productos = Array.from(byProducto.entries())
+    .map(([producto, p]) => ({ producto, cantidad: p.cantidad, ventasUSD: p.ventasUSD }))
+    .sort((a, b) => b.cantidad - a.cantidad);
 
   let facturacionEquipoUSD = 0;
   let teamFtds = 0;
@@ -121,6 +133,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     bonoFtdUSD,
     totalUSD,
     agentes: agentesArr,
+    productos,
     estrellaFtd,
     estrellaVentas,
     necesitaAtencion,
