@@ -524,6 +524,37 @@
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
+  .critico-total {
+    border-color: rgba(229,72,77,0.4);
+    background: linear-gradient(160deg, rgba(229,72,77,0.1), var(--surface-1));
+  }
+  .critico-total-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--gridline);
+  }
+  .critico-total-row:last-child { border-bottom: none; }
+  .critico-total-row .agente-name { font-size: 14px; font-weight: 700; color: var(--text-primary); }
+  .critico-total-stats {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .critico-total-stats span {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--danger);
+    background: rgba(229,72,77,0.14);
+    border: 1px solid rgba(229,72,77,0.35);
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
 
   /* ---- Table ---- */
   table {
@@ -1919,6 +1950,35 @@
     ]);
     criticoSection.appendChild(criticoGrid);
     content.appendChild(criticoSection);
+
+    // Estado critico total: agentes que caen en las tres listas a la vez.
+    var setCosto = {}; criticoCosto.forEach(function (a) { setCosto[a.agente] = true; });
+    var setFtd = {}; criticoFtd.forEach(function (a) { setFtd[a.agente] = true; });
+    var setVentas = {}; criticoVentas.forEach(function (a) { setVentas[a.agente] = true; });
+    var criticoTotal = agentes.filter(function (a) {
+      return setCosto[a.agente] && setFtd[a.agente] && setVentas[a.agente];
+    });
+
+    var totalCard = el("div", { class: "card critico-total" });
+    totalCard.appendChild(el("div", { class: "section-title", text: "🚨 Estado crítico total" }));
+    totalCard.appendChild(el("div", {
+      class: "section-desc",
+      text: "Agentes en estado crítico en FTD, ventas Y costo publicitario a la vez — necesitan atención urgente.",
+    }));
+    if (criticoTotal.length === 0) {
+      totalCard.appendChild(el("div", { class: "section-desc", text: "Nadie está en estado crítico total ahora mismo. 🎉" }));
+    }
+    criticoTotal.forEach(function (a) {
+      totalCard.appendChild(el("div", { class: "critico-total-row" }, [
+        el("div", { class: "agente-name", text: a.agente, title: a.agente }),
+        el("div", { class: "critico-total-stats" }, [
+          el("span", { text: (a.ftdsMes || 0) + (a.ftdsMes === 1 ? " FTD" : " FTDs") }),
+          el("span", { text: "0 membresías" }),
+          el("span", { text: a.costoPorFtdCOP !== null ? currencyCOP.format(a.costoPorFtdCOP) + "/FTD" : "Sin FTD" }),
+        ]),
+      ]));
+    });
+    content.appendChild(el("section", {}, [totalCard]));
 
     renderContentState(content);
     document.getElementById("updated-label").textContent =
