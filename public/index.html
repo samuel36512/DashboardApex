@@ -1385,6 +1385,25 @@
         ]));
       });
       content.appendChild(el("section", {}, [costoCard]));
+
+      var totalInvertidoCOP = conCosto.reduce(function (acc, a) { return acc + (a.gastoPautaCOP || 0); }, 0);
+      var totalFtdsMesCosto = conCosto.reduce(function (acc, a) { return acc + (a.ftdsMes || 0); }, 0);
+      var costoPromedioCOP = totalFtdsMesCosto > 0 ? Math.round(totalInvertidoCOP / totalFtdsMesCosto) : null;
+      var promedioHero = el("div", { class: "card director-hero" }, [
+        el("div", { class: "dh-label", text: "Costo promedio de la oficina este mes" }),
+        el("div", { class: "dh-total", text: costoPromedioCOP !== null ? currencyCOP.format(costoPromedioCOP) + " / FTD" : "Sin FTD todavía" }),
+      ]);
+      promedioHero.appendChild(el("div", { class: "dh-stats" }, [
+        el("div", { class: "dh-stat" }, [
+          el("span", { class: "dh-stat-label", text: "Total invertido" }),
+          el("span", { class: "dh-stat-value", text: currencyCOP.format(totalInvertidoCOP) }),
+        ]),
+        el("div", { class: "dh-stat" }, [
+          el("span", { class: "dh-stat-label", text: "FTD del equipo categorizado" }),
+          el("span", { class: "dh-stat-value", text: totalFtdsMesCosto.toLocaleString("en-US") }),
+        ]),
+      ]));
+      content.appendChild(el("section", {}, [promedioHero]));
     }
 
     renderContentState(content);
