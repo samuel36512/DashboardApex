@@ -106,6 +106,96 @@ async function compararAgente(
   };
 }
 
+// Compara TODOS los agentes de una sola pasada (una sola traida de la
+// etapa completa en GHL, no una por agente) contra lo guardado en la base.
+// Separa los faltantes en "antes del corte" (esperado - ya representado
+// solo como total agregado en el historico) de los de "despues del corte"
+// (huecos reales, con detalle de a quien y cuando).
+async function barridoGeneral(
+  headers: Record<string, string>,
+  locationId: string,
+  tipo: "registro" | "ftd"
+) {
+  const supabase = getSupabase();
+
+  const { data: agentesRows } = await supabase.from("agentes").select("ghl_user_id, nombre").eq("activo", true);
+  const agentesById = new Map((agentesRows ?? []).map((a) => [a.ghl_user_id, a.nombre]));
+
+  const { data: cutoffRow } = await supabase
+    .from("sync_state")
+    .select("value")
+    .eq("key", "registro_ftd_cutoff")
+    .maybeSingle();
+  const cutoffMs = cutoffRow?.value ? new Date(cutoffRow.value as string).getTime() : Date.now();
+
+  const stageId = tipo === "ftd" ? FTD_STAGE_ID : REGISTRADO_STAGE_ID;
+  const opportunities: any[] = [];
+  let startAfter: number | undefined;
+  let startAfterId: string | undefined;
+  for (;;) {
+    const params = new URLSearchParams({
+      location_id: locationId,
+      pipeline_id: PIPELINE_ID,
+      pipeline_stage_id: stageId,
+      status: "all",
+      limit: String(PAGE_LIMIT),
+    });
+    if (startAfter !== undefined && startAfterId) {
+      params.set("startAfter", String(startAfter));
+      params.set("startAfterId", startAfterId);
+    }
+    const r = await fetch(`${GHL_BASE}/opportunities/search?${params.toString()}`, { headers });
+    if (!r.ok) return { error: `GHL /opportunities/search respondio ${r.status}` };
+    const data: any = await r.json();
+    const pagina: any[] = Array.isArray(data?.opportunities) ? data.opportunities : [];
+    if (pagina.length === 0) break;
+    opportunities.push(...pagina);
+    const meta = data?.meta;
+    if (!meta?.nextPage || pagina.length < PAGE_LIMIT) break;
+    startAfter = meta.startAfter;
+    startAfterId = meta.startAfterId;
+  }
+
+  const { data: guardadosRows } = await supabase.from("eventos").select("contacto_id, agente").eq("tipo", tipo);
+  const guardadosSet = new Set((guardadosRows ?? []).map((r) => r.contacto_id));
+
+  const fechaDe = (o: any) =>
+    tipo === "ftd"
+      ? o.lastStageChangeAt || o.updatedAt || o.createdAt
+      : o.createdAt || o.updatedAt;
+
+  const porAgente: Record<string, { totalEnGhl: number; faltantesAntesDelCorte: number; faltantesDespuesDelCorte: number }> = {};
+  const faltantesRecientes: any[] = [];
+
+  for (const o of opportunities) {
+    const agente = agentesById.get(o.assignedTo);
+    if (!agente) continue;
+    if (!porAgente[agente]) porAgente[agente] = { totalEnGhl: 0, faltantesAntesDelCorte: 0, faltantesDespuesDelCorte: 0 };
+    porAgente[agente].totalEnGhl++;
+    if (!o.contactId || guardadosSet.has(o.contactId)) continue;
+
+    const fecha = fechaDe(o);
+    const esPost = fecha && new Date(fecha).getTime() > cutoffMs;
+    if (esPost) {
+      porAgente[agente].faltantesDespuesDelCorte++;
+      faltantesRecientes.push({ agente, contactId: o.contactId, opportunityId: o.id, fecha });
+    } else {
+      porAgente[agente].faltantesAntesDelCorte++;
+    }
+  }
+
+  faltantesRecientes.sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
+
+  return {
+    tipo,
+    cutoff: cutoffRow?.value ?? null,
+    totalOportunidadesEnEtapa: opportunities.length,
+    totalGuardadoGlobal: guardadosSet.size,
+    porAgente,
+    faltantesRecientes,
+  };
+}
+
 // Busca un cliente por nombre directo en GHL y muestra sus oportunidades en
 // el pipeline principal (etapa, fechas, dueno asignado), para diagnosticar
 // casos puntuales sin tener que adivinar por que un registro/ftd no aparece.
@@ -126,6 +216,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     Version: GHL_VERSION,
     Accept: "application/json",
   };
+
+  if (req.query.barrido === "1") {
+    const tipo = req.query.tipo === "ftd" ? "ftd" : "registro";
+    const resultado = await barridoGeneral(headers, locationId, tipo);
+    return res.status(200).json(resultado);
+  }
 
   // Muestra el ghl_user_id que tenemos guardado para un agente, para
   // compararlo contra el "assignedTo"/"opportunityAsignadaA" que devuelve
