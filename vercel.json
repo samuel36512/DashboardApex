@@ -4,7 +4,8 @@
     { "source": "/metrics", "destination": "/api/metrics" },
     { "source": "/usuarios", "destination": "/api/usuarios" },
     { "source": "/pago-director", "destination": "/api/pago-director" },
-    { "source": "/mi-ganancia", "destination": "/api/mi-ganancia" }
+    { "source": "/mi-ganancia", "destination": "/api/mi-ganancia" },
+    { "source": "/ventas-detalle", "destination": "/api/ventas-detalle" }
   ],
   "functions": {
     "api/ghl-sync.ts": { "maxDuration": 55 },

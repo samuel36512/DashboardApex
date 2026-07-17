@@ -864,6 +864,32 @@
   .user-row .user-nombre { font-weight: 600; }
   .user-row .user-nombre.sin-nombre { color: var(--text-muted); font-weight: 400; font-style: italic; }
   .user-row .user-fecha { font-size: 12px; color: var(--text-muted); text-align: right; }
+
+  /* ---- Detalle de ventas ---- */
+  .venta-table-wrap { overflow-x: auto; }
+  .venta-table { width: 100%; min-width: 760px; }
+  .venta-row {
+    display: grid;
+    grid-template-columns: 1.6fr 1.1fr 1.3fr 0.8fr 0.8fr 0.9fr;
+    gap: 12px;
+    align-items: center;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--gridline);
+    font-size: 13px;
+  }
+  .venta-row:last-child { border-bottom: none; }
+  .venta-row.header {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    font-weight: 600;
+    border-bottom: 1px solid var(--gridline);
+  }
+  .venta-row .venta-cliente { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .venta-row .venta-monto, .venta-row .venta-comision { font-variant-numeric: tabular-nums; }
+  .venta-row .venta-comision { color: var(--series-1); }
+  .venta-row .venta-fecha { font-size: 12px; color: var(--text-muted); text-align: right; }
 </style>
 </head>
 <body>
@@ -904,6 +930,10 @@
   var usuariosHasta = "";
   var usuariosAgente = "";
   var lastUsuariosData = null;
+
+  var ventasDetalleDesde = "";
+  var ventasDetalleHasta = "";
+  var ventasDetalleAgente = "";
 
   var KNOWN_EMAILS = {
     "Ana Sánchez": "92anasp@gmail.com",
@@ -1625,9 +1655,116 @@
     teamCard.appendChild(buildTeamSalesGrid(agentes));
     content.appendChild(el("section", {}, [teamCard]));
 
+    var ventasDetalleContainer = el("div", { id: "ventas-detalle-container" }, [
+      el("div", { class: "card state" }, [el("div", { class: "big", text: "Cargando detalle de ventas…" })]),
+    ]);
+    content.appendChild(ventasDetalleContainer);
+
     renderContentState(content);
     document.getElementById("updated-label").textContent =
       "Actualizado " + new Date(data.actualizado || Date.now()).toLocaleTimeString("es-419", { hour: "2-digit", minute: "2-digit" });
+
+    cargarVentasDetalle();
+  }
+
+  function cargarVentasDetalle() {
+    if (!ventasDetalleDesde || !ventasDetalleHasta) {
+      var hoyStr = fmtDate(new Date());
+      ventasDetalleDesde = hoyStr;
+      ventasDetalleHasta = hoyStr;
+    }
+    var qs = "?desde=" + encodeURIComponent(localDayStartIso(ventasDetalleDesde)) + "&hasta=" + encodeURIComponent(localDayEndIso(ventasDetalleHasta));
+    if (ventasDetalleAgente) qs += "&agente=" + encodeURIComponent(ventasDetalleAgente);
+
+    fetch("/ventas-detalle" + qs, { headers: { Authorization: "Bearer " + currentAccessToken } })
+      .then(function (res) {
+        if (!res.ok) throw new Error("No se pudo cargar el detalle de ventas (código " + res.status + ")");
+        return res.json();
+      })
+      .then(function (data) {
+        renderVentasDetalleSection(data);
+      })
+      .catch(function (err) {
+        var c = document.getElementById("ventas-detalle-container");
+        if (!c) return;
+        c.innerHTML = "";
+        c.appendChild(el("div", { class: "card state" }, [
+          el("div", { class: "big", text: "No se pudo cargar el detalle de ventas" }),
+          el("div", { class: "small", text: err.message || "" }),
+        ]));
+      });
+  }
+
+  function renderVentasDetalleSection(data) {
+    var container = document.getElementById("ventas-detalle-container");
+    if (!container) return;
+    container.innerHTML = "";
+
+    if (currentRol === "director") {
+      var agentesSel = data.agentesActivos || [];
+      var select = el("select", { class: "agente-select" }, [el("option", { value: "", text: "Todos los agentes" })]);
+      agentesSel.forEach(function (a) {
+        select.appendChild(el("option", { value: a, text: a }));
+      });
+      select.value = ventasDetalleAgente;
+      select.addEventListener("change", function () {
+        ventasDetalleAgente = select.value;
+        cargarVentasDetalle();
+      });
+      container.appendChild(el("div", { class: "agente-filter-row" }, [
+        el("span", { class: "range-label", text: "Agente:" }),
+        select,
+      ]));
+    }
+
+    var desdeInput = el("input", { type: "date", class: "range-input", value: ventasDetalleDesde || "" });
+    var hastaInput = el("input", { type: "date", class: "range-input", value: ventasDetalleHasta || "" });
+    var aplicarBtn = el("button", { class: "btn", text: "Aplicar" });
+    aplicarBtn.addEventListener("click", function () {
+      if (!desdeInput.value || !hastaInput.value) return;
+      ventasDetalleDesde = desdeInput.value;
+      ventasDetalleHasta = hastaInput.value > desdeInput.value ? hastaInput.value : desdeInput.value;
+      cargarVentasDetalle();
+    });
+    container.appendChild(el("div", { class: "range-row active" }, [
+      el("span", { class: "range-label", text: "Rango de fechas:" }),
+      desdeInput,
+      el("span", { text: "→" }),
+      hastaInput,
+      aplicarBtn,
+    ]));
+
+    var ventas = data.ventas || [];
+    var detalleCard = el("div", { class: "card" });
+    detalleCard.appendChild(el("div", { class: "section-title", text: "Detalle de ventas" }));
+    detalleCard.appendChild(el("div", { class: "section-desc", text: ventas.length + (ventas.length === 1 ? " venta" : " ventas") }));
+    if (ventas.length === 0) {
+      detalleCard.appendChild(el("div", { class: "section-desc", text: "Todavía no hay ventas en este rango." }));
+    } else {
+      var wrap = el("div", { class: "venta-table-wrap" });
+      var table = el("div", { class: "venta-table" });
+      table.appendChild(el("div", { class: "venta-row header" }, [
+        el("div", { text: "Cliente (correo)" }),
+        el("div", { text: "Agente" }),
+        el("div", { text: "Producto" }),
+        el("div", { text: "Monto" }),
+        el("div", { text: "Comisión" }),
+        el("div", { text: "Fecha" }),
+      ]));
+      ventas.forEach(function (v) {
+        table.appendChild(el("div", { class: "venta-row" }, [
+          el("div", { class: "venta-cliente", text: v.cliente || "—", title: v.cliente || "" }),
+          el("div", { text: v.agente }),
+          el("div", { text: v.producto || "—" }),
+          el("div", { class: "venta-monto", text: currencyPrecise.format(v.monto || 0) }),
+          el("div", { class: "venta-comision", text: currencyPrecise.format(v.comision || 0) }),
+          el("div", { class: "venta-fecha", text: fmtFechaHora(v.fecha) }),
+        ]));
+      });
+      wrap.appendChild(table);
+      detalleCard.appendChild(wrap);
+    }
+    container.appendChild(el("section", {}, [detalleCard]));
   }
 
   function renderPagoDirectorView(data) {
