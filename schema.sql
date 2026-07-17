@@ -6,6 +6,7 @@ create table if not exists eventos (
   monto numeric,
   contacto_nombre text,
   contacto_telefono text,
+  comision numeric,
   fecha timestamptz not null,
   creado_en timestamptz not null default now(),
   unique (contacto_id, tipo)
@@ -14,6 +15,8 @@ create table if not exists eventos (
 -- Si la tabla ya existia antes de agregar el panel de usuarios registrados/FTD:
 alter table eventos add column if not exists contacto_nombre text;
 alter table eventos add column if not exists contacto_telefono text;
+-- Comision del agente por venta (columna "Comisión" del sheet de ventas), para Ventas del equipo:
+alter table eventos add column if not exists comision numeric;
 
 create index if not exists idx_eventos_agente on eventos (agente);
 create index if not exists idx_eventos_tipo on eventos (tipo);

@@ -6,6 +6,7 @@ interface AgentAgg {
   registros: number;
   ftds: number;
   ventasUSD: number;
+  comisionUSD: number;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -54,7 +55,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const byAgent = new Map<string, AgentAgg>();
   for (const a of agentesRows ?? []) {
-    byAgent.set(a.nombre, { leads: 0, registros: 0, ftds: 0, ventasUSD: 0 });
+    byAgent.set(a.nombre, { leads: 0, registros: 0, ftds: 0, ventasUSD: 0, comisionUSD: 0 });
   }
 
   // Supabase/PostgREST limita cada consulta a un maximo de filas (tipicamente
@@ -62,7 +63,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // traer todo, si no los conteos quedan cortados.
   const PAGE = 1000;
   for (let offset = 0; ; offset += PAGE) {
-    let query = supabase.from("eventos").select("agente, tipo, monto").range(offset, offset + PAGE - 1);
+    let query = supabase.from("eventos").select("agente, tipo, monto, comision").range(offset, offset + PAGE - 1);
     // desde/hasta vienen del front como instante UTC completo (ya resuelto
     // desde el dia calendario LOCAL del director, no UTC) - si llegan como
     // fecha simple "YYYY-MM-DD" (uso directo de la API, sin el front), se
@@ -76,13 +77,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     for (const row of page ?? []) {
       if (!byAgent.has(row.agente)) {
-        byAgent.set(row.agente, { leads: 0, registros: 0, ftds: 0, ventasUSD: 0 });
+        byAgent.set(row.agente, { leads: 0, registros: 0, ftds: 0, ventasUSD: 0, comisionUSD: 0 });
       }
       const agg = byAgent.get(row.agente)!;
       if (row.tipo === "lead") agg.leads++;
       else if (row.tipo === "registro") agg.registros++;
       else if (row.tipo === "ftd") agg.ftds++;
-      else if (row.tipo === "venta") agg.ventasUSD += Number(row.monto ?? 0);
+      else if (row.tipo === "venta") {
+        agg.ventasUSD += Number(row.monto ?? 0);
+        agg.comisionUSD += Number(row.comision ?? 0);
+      }
     }
     if (!page || page.length < PAGE) break;
   }
@@ -126,6 +130,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       registros: a.registros,
       ftds: a.ftds,
       ventasUSD: a.ventasUSD,
+      comisionUSD: a.comisionUSD,
       conversionesRecientes: conversionesRecientes.get(agente) || [],
       conversion: {
         leadToRegistro: pct(a.registros, a.leads),

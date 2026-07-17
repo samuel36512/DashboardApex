@@ -261,6 +261,69 @@
     margin-left: 4px;
   }
 
+  /* ---- Ventas del equipo ---- */
+  .team-sales-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 14px;
+    margin-top: 4px;
+  }
+  .team-sales-card {
+    background: linear-gradient(160deg, var(--surface-1), var(--page));
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px;
+    transition: border-color 0.15s, transform 0.15s;
+  }
+  .team-sales-card:hover {
+    border-color: var(--series-1);
+    transform: translateY(-2px);
+  }
+  .tsc-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--page);
+    background: linear-gradient(135deg, var(--series-1), #f4d78a);
+    margin-bottom: 12px;
+  }
+  .tsc-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 14px;
+  }
+  .tsc-stat {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding: 7px 0;
+    border-top: 1px solid var(--gridline);
+  }
+  .tsc-stat:first-of-type { border-top: none; }
+  .tsc-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .tsc-value {
+    font-size: 15px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+  }
+  .tsc-value.gold { color: var(--series-1); }
+
   /* ---- Table ---- */
   table {
     width: 100%;
@@ -713,6 +776,11 @@
       label: "Registros y FTD",
       desc: "El ID, nombre y agente dueño de cada usuario que se registró o hizo FTD.",
     },
+    {
+      view: "ventas-equipo",
+      label: "Ventas del equipo",
+      desc: "Facturación y comisión ganada de cada agente, mes a mes.",
+    },
   ];
 
   function renderWelcome() {
@@ -812,10 +880,11 @@
   var currentHasta = null;
 
   var VIEW_TITLES = {
-    dashboard: "Conversión de Ventas",
+    dashboard: "Conversión de FTDs",
     ranking: "Ranking por FTD",
     inactividad: "Alerta de inactividad",
     usuarios: "Registros y FTD",
+    "ventas-equipo": "Ventas del equipo",
   };
 
   function renderShell() {
@@ -1057,34 +1126,6 @@
       return;
     }
 
-    var maxScale = Math.max(meta, agentes[0].ventasUSD || 0) * 1.15;
-    var chartCard = el("div", { class: "card" });
-    chartCard.appendChild(el("div", { class: "section-title", text: "Ventas por agente" }));
-    chartCard.appendChild(el("div", { class: "section-desc", text: "Meta individual: " + currency.format(meta) }));
-    agentes.forEach(function (a) {
-      var widthPct = Math.max(0, Math.min(100, (a.ventasUSD / maxScale) * 100));
-      var goalPct = Math.max(0, Math.min(100, (meta / maxScale) * 100));
-      var track = el("div", { class: "bar-track" }, [
-        el("div", { class: "bar-fill", style: "width:" + widthPct + "%" }),
-        el("div", { class: "goal-line", style: "left:" + goalPct + "%" }),
-      ]);
-      var metGoal = a.ventasUSD >= meta;
-      var row = el("div", { class: "bar-row" }, [
-        el("div", { class: "agente-name", text: a.agente, title: a.agente }),
-        track,
-        el("div", { class: "amount" }, [
-          metGoal ? el("span", { class: "goal-badge", title: "Meta alcanzada", text: "✓" }) : null,
-          el("span", { text: currency.format(a.ventasUSD) }),
-        ]),
-      ]);
-      chartCard.appendChild(row);
-    });
-    chartCard.appendChild(el("div", { class: "legend-row" }, [
-      el("div", { class: "legend-item" }, [el("div", { class: "swatch" }), el("span", { text: "Ventas (USD)" })]),
-      el("div", { class: "legend-item" }, [el("div", { class: "swatch line" }), el("span", { text: "Meta ($" + meta.toLocaleString("en-US") + ")" })]),
-    ]));
-    content.appendChild(el("section", {}, [chartCard]));
-
     content.appendChild(el("section", {}, [buildRankingCard(data)]));
 
     var tableCard = el("div", { class: "card table-scroll" });
@@ -1167,6 +1208,91 @@
   function renderRankingView(data) {
     var content = el("div");
     content.appendChild(el("section", {}, [buildRankingCard(data)]));
+    renderContentState(content);
+    document.getElementById("updated-label").textContent =
+      "Actualizado " + new Date(data.actualizado || Date.now()).toLocaleTimeString("es-419", { hour: "2-digit", minute: "2-digit" });
+  }
+
+  function buildVentasChart(agentes, meta) {
+    var maxScale = Math.max(meta, (agentes[0] && agentes[0].ventasUSD) || 0) * 1.15;
+    var chartCard = el("div", { class: "card" });
+    chartCard.appendChild(el("div", { class: "section-title", text: "Ventas por agente" }));
+    chartCard.appendChild(el("div", { class: "section-desc", text: "Meta individual: " + currency.format(meta) }));
+    agentes.forEach(function (a) {
+      var widthPct = Math.max(0, Math.min(100, ((a.ventasUSD || 0) / maxScale) * 100));
+      var goalPct = Math.max(0, Math.min(100, (meta / maxScale) * 100));
+      var track = el("div", { class: "bar-track" }, [
+        el("div", { class: "bar-fill", style: "width:" + widthPct + "%" }),
+        el("div", { class: "goal-line", style: "left:" + goalPct + "%" }),
+      ]);
+      var metGoal = (a.ventasUSD || 0) >= meta;
+      var row = el("div", { class: "bar-row" }, [
+        el("div", { class: "agente-name", text: a.agente, title: a.agente }),
+        track,
+        el("div", { class: "amount" }, [
+          metGoal ? el("span", { class: "goal-badge", title: "Meta alcanzada", text: "✓" }) : null,
+          el("span", { text: currency.format(a.ventasUSD || 0) }),
+        ]),
+      ]);
+      chartCard.appendChild(row);
+    });
+    chartCard.appendChild(el("div", { class: "legend-row" }, [
+      el("div", { class: "legend-item" }, [el("div", { class: "swatch" }), el("span", { text: "Ventas (USD)" })]),
+      el("div", { class: "legend-item" }, [el("div", { class: "swatch line" }), el("span", { text: "Meta ($" + meta.toLocaleString("en-US") + ")" })]),
+    ]));
+    return chartCard;
+  }
+
+  function iniciales(nombre) {
+    return (nombre || "")
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map(function (w) { return w[0]; })
+      .join("")
+      .toUpperCase();
+  }
+
+  function buildTeamSalesGrid(agentes) {
+    var grid = el("div", { class: "team-sales-grid" });
+    agentes.forEach(function (a) {
+      grid.appendChild(el("div", { class: "team-sales-card" }, [
+        el("div", { class: "tsc-avatar", text: iniciales(a.agente) }),
+        el("div", { class: "tsc-name", text: a.agente, title: a.agente }),
+        el("div", { class: "tsc-stat" }, [
+          el("span", { class: "tsc-label", text: "Facturación" }),
+          el("span", { class: "tsc-value", text: currency.format(a.ventasUSD || 0) }),
+        ]),
+        el("div", { class: "tsc-stat" }, [
+          el("span", { class: "tsc-label", text: "Comisión ganada" }),
+          el("span", { class: "tsc-value gold", text: currency.format(a.comisionUSD || 0) }),
+        ]),
+      ]));
+    });
+    return grid;
+  }
+
+  function renderVentasEquipoView(data) {
+    var meta = Number(data.metaVentasUSD) || 2400;
+    var agentes = (data.agentes || []).slice().sort(function (a, b) { return (b.ventasUSD || 0) - (a.ventasUSD || 0); });
+    var content = el("div");
+
+    if (agentes.length === 0) {
+      content.appendChild(el("div", { class: "card state" }, [
+        el("div", { class: "big", text: "Todavía no hay ventas registradas" }),
+      ]));
+      renderContentState(content);
+      return;
+    }
+
+    content.appendChild(el("section", {}, [buildVentasChart(agentes, meta)]));
+
+    var teamCard = el("div", { class: "card" });
+    teamCard.appendChild(el("div", { class: "section-title", text: "Facturación y comisión por agente" }));
+    teamCard.appendChild(el("div", { class: "section-desc", text: "Cuánto lleva vendido cada agente y cuánto ha ganado en comisión." }));
+    teamCard.appendChild(buildTeamSalesGrid(agentes));
+    content.appendChild(el("section", {}, [teamCard]));
+
     renderContentState(content);
     document.getElementById("updated-label").textContent =
       "Actualizado " + new Date(data.actualizado || Date.now()).toLocaleTimeString("es-419", { hour: "2-digit", minute: "2-digit" });
@@ -1407,6 +1533,7 @@
         if (currentView === "ranking") renderRankingView(data);
         else if (currentView === "inactividad") renderInactividadView(data);
         else if (currentView === "usuarios") renderUsuariosView(data);
+        else if (currentView === "ventas-equipo") renderVentasEquipoView(data);
         else renderData(data);
       })
       .catch(function (err) {
