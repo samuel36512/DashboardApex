@@ -142,6 +142,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ agentes: data ?? [] });
   }
 
+  // Busca directo en la tabla eventos por contacto_id, para saber con
+  // certeza si una fila puntual quedo guardada (y con que fecha/agente) sin
+  // tener que inferirlo comparando contra GHL.
+  const checkEventoId = typeof req.query.checkevento === "string" ? req.query.checkevento.trim() : "";
+  if (checkEventoId) {
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from("eventos")
+      .select("contacto_id, agente, tipo, fecha, contacto_nombre, contacto_telefono, creado_en")
+      .eq("contacto_id", checkEventoId);
+    if (error) return res.status(500).json({ error: error.message });
+    return res.status(200).json({ eventos: data ?? [] });
+  }
+
   if (req.query.cutoff === "1") {
     const supabase = getSupabase();
     const { data: cutoffRow } = await supabase
