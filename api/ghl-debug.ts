@@ -4,6 +4,7 @@ import { getSupabase } from "./_lib/supabase";
 const GHL_BASE = "https://services.leadconnectorhq.com";
 const GHL_VERSION = "2021-07-28";
 const PIPELINE_ID = "oRjd1pUxOgNbzkdLBjWC";
+const REGISTRADO_STAGE_ID = "09b221aa-9791-4f05-8869-1b4ac8c86e06";
 const FTD_STAGE_ID = "3796b590-4fa6-4ef9-9b27-4aca989f6fd3";
 const PAGE_LIMIT = 100;
 
@@ -11,6 +12,14 @@ const PAGE_LIMIT = 100;
 // (registro/ftd) segun GHL contra lo que ya tenemos guardado en la base -
 // asi identificamos exactamente cuales faltan (y sus fechas), sin tener que
 // revisar cliente por cliente a mano.
+//
+// Importante: se arma IGUAL que el sync real (cargarEtapaPipeline en
+// ghl-sync.ts) - se trae TODA la etapa (registrado o ftd) con status=all y
+// se filtra el dueno del lado del cliente comparando o.assignedTo, en vez de
+// mandarle assigned_to a la API de GHL como query param. El filtro
+// assigned_to de GHL no se comporta como uno esperaria (devuelve resultados
+// que no coinciden con el agente), asi que replicar el metodo real evita
+// falsos "faltantes".
 async function compararAgente(
   headers: Record<string, string>,
   locationId: string,
@@ -27,6 +36,7 @@ async function compararAgente(
     return { error: `No encontre un agente que coincida con "${agenteNombre}"` };
   }
 
+  const stageId = tipo === "ftd" ? FTD_STAGE_ID : REGISTRADO_STAGE_ID;
   const opportunities: any[] = [];
   let startAfter: number | undefined;
   let startAfterId: string | undefined;
@@ -34,11 +44,10 @@ async function compararAgente(
     const params = new URLSearchParams({
       location_id: locationId,
       pipeline_id: PIPELINE_ID,
-      assigned_to: agenteRow.ghl_user_id,
+      pipeline_stage_id: stageId,
       status: "all",
       limit: String(PAGE_LIMIT),
     });
-    if (tipo === "ftd") params.set("pipeline_stage_id", FTD_STAGE_ID);
     if (startAfter !== undefined && startAfterId) {
       params.set("startAfter", String(startAfter));
       params.set("startAfterId", startAfterId);
@@ -48,7 +57,7 @@ async function compararAgente(
     const data: any = await r.json();
     const pagina: any[] = Array.isArray(data?.opportunities) ? data.opportunities : [];
     if (pagina.length === 0) break;
-    opportunities.push(...pagina);
+    opportunities.push(...pagina.filter((o) => o.assignedTo === agenteRow.ghl_user_id));
     const meta = data?.meta;
     if (!meta?.nextPage || pagina.length < PAGE_LIMIT) break;
     startAfter = meta.startAfter;
