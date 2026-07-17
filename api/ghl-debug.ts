@@ -156,6 +156,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ eventos: data ?? [] });
   }
 
+  // Resumen de las filas "baseline-*" (el historico sembrado a mano): cuantas
+  // hay por tipo y que fecha les quedo asignada - si esa fecha cae fuera de
+  // un rango que se este filtrando (ej. "Este mes"), ese historico
+  // desaparece del conteo aunque siga estando en la base.
+  if (req.query.baseline === "1") {
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from("eventos")
+      .select("tipo, fecha, agente")
+      .like("contacto_id", "baseline-%");
+    if (error) return res.status(500).json({ error: error.message });
+    const rows = data ?? [];
+    const porTipo: Record<string, { cantidad: number; fechaMin: string; fechaMax: string }> = {};
+    for (const r of rows) {
+      const cur = porTipo[r.tipo] ?? { cantidad: 0, fechaMin: r.fecha, fechaMax: r.fecha };
+      cur.cantidad++;
+      if (r.fecha < cur.fechaMin) cur.fechaMin = r.fecha;
+      if (r.fecha > cur.fechaMax) cur.fechaMax = r.fecha;
+      porTipo[r.tipo] = cur;
+    }
+    return res.status(200).json({ totalFilasBaseline: rows.length, porTipo });
+  }
+
   if (req.query.cutoff === "1") {
     const supabase = getSupabase();
     const { data: cutoffRow } = await supabase
