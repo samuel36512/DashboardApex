@@ -118,6 +118,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     Accept: "application/json",
   };
 
+  // Lista los custom fields configurados en el location, para identificar
+  // si existe alguno tipo "ID de broker"/"cuenta" y con que id/fieldKey se
+  // guarda (necesario para despues poder leer su valor en cada contacto).
+  if (req.query.customfields === "1") {
+    const r = await fetch(`${GHL_BASE}/locations/${locationId}/customFields`, { headers });
+    if (!r.ok) return res.status(502).json({ error: `GHL /locations/${locationId}/customFields respondio ${r.status}` });
+    const data: any = await r.json();
+    const campos = Array.isArray(data?.customFields) ? data.customFields : [];
+    return res.status(200).json({
+      campos: campos.map((c: any) => ({ id: c.id, name: c.name, fieldKey: c.fieldKey, dataType: c.dataType })),
+    });
+  }
+
   if (req.query.pipelines === "1") {
     const r = await fetch(`${GHL_BASE}/opportunities/pipelines?locationId=${locationId}`, { headers });
     if (!r.ok) return res.status(502).json({ error: `GHL /opportunities/pipelines respondio ${r.status}` });
@@ -195,6 +208,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       contactId: c.id,
       nombre: contactFull.contactName || `${contactFull.firstName ?? ""} ${contactFull.lastName ?? ""}`.trim(),
       contactoAsignadoA: contactFull.assignedTo,
+      customFields: contactFull.customFields,
       totalOpportunitiesDevueltas: opportunities.length,
       opportunitiesDeEsteContacto: propias.map((o) => ({
         id: o.id,

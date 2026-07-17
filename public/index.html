@@ -683,8 +683,8 @@
     },
     {
       view: "usuarios",
-      label: "Usuarios registrados y FTD",
-      desc: "El ID, nombre y agente dueño de cada usuario que se registró o hizo FTD.",
+      label: "Registros y FTD de hoy",
+      desc: "El ID, nombre y agente dueño de cada usuario que se registró o hizo FTD hoy.",
     },
   ];
 
@@ -779,7 +779,7 @@
     dashboard: "Conversión de Ventas",
     ranking: "Ranking por FTD",
     inactividad: "Alerta de inactividad",
-    usuarios: "Usuarios registrados y FTD",
+    usuarios: "Registros y FTD de hoy",
   };
 
   function renderShell() {
@@ -1115,10 +1115,19 @@
       "Actualizado " + new Date(data.actualizado || Date.now()).toLocaleTimeString("es-419", { hour: "2-digit", minute: "2-digit" });
   }
 
+  // Compara una fecha contra un dia calendario puntual en la zona horaria
+  // local del navegador (offset=0 hoy, 1 ayer, etc - no acumulado).
+  function esDiaObjetivo(fechaIso, offset) {
+    var objetivo = new Date();
+    objetivo.setDate(objetivo.getDate() - offset);
+    var f = new Date(fechaIso);
+    return f.getFullYear() === objetivo.getFullYear() && f.getMonth() === objetivo.getMonth() && f.getDate() === objetivo.getDate();
+  }
+
   // Filtra los eventos recientes del agente segun el preset elegido: "dia"
-  // compara contra un dia calendario puntual (offset=0 hoy, 1 ayer, etc, no
-  // acumulado), "horas" es una ventana movil desde ahora (ej. ultimas 8h),
-  // "rango" es un rango de fechas que el director elige libremente.
+  // compara contra un dia calendario puntual, "horas" es una ventana movil
+  // desde ahora (ej. ultimas 8h), "rango" es un rango de fechas que el
+  // director elige libremente.
   function eventosEnVentana(eventos, preset) {
     if (preset.tipo === "horas") {
       var limite = Date.now() - preset.horas * 60 * 60 * 1000;
@@ -1132,12 +1141,7 @@
         return t >= inicio.getTime() && t <= fin.getTime();
       });
     }
-    var objetivo = new Date();
-    objetivo.setDate(objetivo.getDate() - preset.offset);
-    return (eventos || []).filter(function (e) {
-      var f = new Date(e.fecha);
-      return f.getFullYear() === objetivo.getFullYear() && f.getMonth() === objetivo.getMonth() && f.getDate() === objetivo.getDate();
-    });
+    return (eventos || []).filter(function (e) { return esDiaObjetivo(e.fecha, preset.offset); });
   }
 
   var ESTADO_ORDEN = { ninguno: 0, registro: 1, ftd: 2 };
@@ -1265,9 +1269,11 @@
   }
 
   function renderUsuariosView(data) {
+    var registrosHoy = (data.registros || []).filter(function (f) { return esDiaObjetivo(f.fecha, 0); });
+    var ftdsHoy = (data.ftds || []).filter(function (f) { return esDiaObjetivo(f.fecha, 0); });
     var content = el("div");
-    content.appendChild(el("section", {}, [buildUserTable("Usuarios registrados", data.registros || [])]));
-    content.appendChild(el("section", {}, [buildUserTable("Usuarios con FTD", data.ftds || [])]));
+    content.appendChild(el("section", {}, [buildUserTable("Registros de hoy", registrosHoy)]));
+    content.appendChild(el("section", {}, [buildUserTable("FTD de hoy", ftdsHoy)]));
     renderContentState(content);
     document.getElementById("updated-label").textContent =
       "Actualizado " + new Date(data.actualizado || Date.now()).toLocaleTimeString("es-419", { hour: "2-digit", minute: "2-digit" });
