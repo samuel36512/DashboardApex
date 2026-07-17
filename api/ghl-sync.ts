@@ -40,6 +40,22 @@ interface EventoRow {
   agente: string;
   tipo: "lead" | "registro" | "ftd";
   fecha: string;
+  contacto_nombre?: string | null;
+}
+
+// Trae el nombre del contacto desde GHL. Se usa tanto para las filas nuevas
+// de registro/ftd como para el backfill de las que quedaron sin nombre.
+async function fetchContactName(headers: Record<string, string>, contactId: string): Promise<string | null> {
+  try {
+    const r = await fetchWithTimeout(`${GHL_BASE}/contacts/${contactId}`, { headers });
+    if (!r.ok) return null;
+    const data: any = await r.json();
+    const c = data?.contact;
+    if (!c) return null;
+    return c.contactName || `${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() || null;
+  } catch {
+    return null;
+  }
 }
 
 interface SearchCursor {
@@ -79,7 +95,8 @@ async function cargarEtapaPipeline(
   tipo: "registro" | "ftd",
   fechaDe: (o: any) => string,
   cutoffMs: number,
-  agentesById: Map<string, string>
+  agentesById: Map<string, string>,
+  started: number
 ) {
   const rows: EventoRow[] = [];
   let startAfter: number | undefined;
@@ -127,7 +144,55 @@ async function cargarEtapaPipeline(
     startAfterId = meta.startAfterId;
   }
 
+  // El nombre del contacto solo se puede obtener con una llamada aparte
+  // (opportunities/search no lo trae), asi que se busca solo para las filas
+  // nuevas de esta corrida, en lotes chicos y respetando el tiempo que queda
+  // del cron - si se agota, esas filas quedan sin nombre y el backfill
+  // oportunista de mas adelante las completa en una corrida futura.
+  const NAME_BATCH = 8;
+  for (let i = 0; i < rows.length && timeLeft(started) > 5000; i += NAME_BATCH) {
+    const lote = rows.slice(i, i + NAME_BATCH);
+    await Promise.all(
+      lote.map(async (row) => {
+        row.contacto_nombre = await fetchContactName(headers, row.contacto_id);
+      })
+    );
+  }
+
   return { rows, revisadas, sinDueno };
+}
+
+// Completa el nombre de contactos de filas viejas de registro/ftd que
+// quedaron sin nombre (guardadas antes de este panel, o cuyo fetch fallo en
+// su momento). Se procesa en lotes chicos por corrida para no competir por
+// tiempo con el resto del sync - con el cron corriendo periodicamente, se
+// termina de completar solo en unas pocas corridas.
+async function backfillNombres(headers: Record<string, string>, supabase: Supabase, started: number) {
+  if (timeLeft(started) < 8000) return { actualizados: 0 };
+
+  const { data: faltantes } = await supabase
+    .from("eventos")
+    .select("id, contacto_id")
+    .in("tipo", ["registro", "ftd"])
+    .is("contacto_nombre", null)
+    .not("contacto_id", "like", "baseline-%")
+    .limit(20);
+  if (!faltantes || faltantes.length === 0) return { actualizados: 0 };
+
+  let actualizados = 0;
+  const NAME_BATCH = 8;
+  for (let i = 0; i < faltantes.length && timeLeft(started) > 5000; i += NAME_BATCH) {
+    const lote = faltantes.slice(i, i + NAME_BATCH);
+    await Promise.all(
+      lote.map(async (fila) => {
+        const nombre = await fetchContactName(headers, fila.contacto_id);
+        if (!nombre) return;
+        const { error } = await supabase.from("eventos").update({ contacto_nombre: nombre }).eq("id", fila.id);
+        if (!error) actualizados++;
+      })
+    );
+  }
+  return { actualizados };
 }
 
 // Leads por agente: se pide por assignedTo del CONTACTO, que ya probamos
@@ -241,7 +306,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       "registro",
       (o) => o.createdAt || o.updatedAt || new Date().toISOString(),
       cutoffMs,
-      agentesById
+      agentesById,
+      started
     );
     const ftd = await cargarEtapaPipeline(
       headers,
@@ -250,7 +316,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       "ftd",
       (o) => o.lastStageChangeAt || o.updatedAt || o.createdAt || new Date().toISOString(),
       cutoffMs,
-      agentesById
+      agentesById,
+      started
     );
     const pipelineRows = [...registro.rows, ...ftd.rows];
     if (pipelineRows.length > 0) {
@@ -302,6 +369,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     resumen.agentes = { agentesProcesados, totalAgentes: agentesList.length, contactosRevisados, eventosGuardados, completo };
+
+    resumen.backfillNombres = await backfillNombres(headers, supabase, started);
   } catch (err: any) {
     await supabase.from("sync_state").upsert({ key: CURSOR_KEY, value: nextCursor });
     return res.status(502).json({ error: err?.message || "Error sincronizando con GHL", resumen });

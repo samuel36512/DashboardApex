@@ -1,7 +1,8 @@
 {
   "rewrites": [
     { "source": "/webhook/:tipo", "destination": "/api/webhook/:tipo" },
-    { "source": "/metrics", "destination": "/api/metrics" }
+    { "source": "/metrics", "destination": "/api/metrics" },
+    { "source": "/usuarios", "destination": "/api/usuarios" }
   ],
   "functions": {
     "api/ghl-sync.ts": { "maxDuration": 55 },

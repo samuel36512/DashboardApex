@@ -521,6 +521,32 @@
   .inact-row.ftd .inact-status { color: var(--good); }
   .inact-row.registro .inact-status { color: var(--warning); }
   .inact-row.ninguno .inact-status { color: var(--danger); }
+
+  /* ---- Usuarios (registro / FTD) ---- */
+  .user-table-wrap { overflow-x: auto; }
+  .user-table { width: 100%; min-width: 480px; }
+  .user-row {
+    display: grid;
+    grid-template-columns: 1.6fr 1.4fr 1.1fr 0.9fr;
+    gap: 12px;
+    align-items: center;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--gridline);
+    font-size: 13px;
+  }
+  .user-row:last-child { border-bottom: none; }
+  .user-row.header {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    font-weight: 600;
+    border-bottom: 1px solid var(--gridline);
+  }
+  .user-row .user-id { font-family: monospace; font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .user-row .user-nombre { font-weight: 600; }
+  .user-row .user-nombre.sin-nombre { color: var(--text-muted); font-weight: 400; font-style: italic; }
+  .user-row .user-fecha { font-size: 12px; color: var(--text-muted); text-align: right; }
 </style>
 </head>
 <body>
@@ -655,6 +681,11 @@
       label: "Alerta de inactividad",
       desc: "Quién hizo FTD, quién solo registró y quién no tuvo actividad.",
     },
+    {
+      view: "usuarios",
+      label: "Usuarios registrados y FTD",
+      desc: "El ID, nombre y agente dueño de cada usuario que se registró o hizo FTD.",
+    },
   ];
 
   function renderWelcome() {
@@ -748,6 +779,7 @@
     dashboard: "Conversión de Ventas",
     ranking: "Ranking por FTD",
     inactividad: "Alerta de inactividad",
+    usuarios: "Usuarios registrados y FTD",
   };
 
   function renderShell() {
@@ -1199,18 +1231,61 @@
       "Actualizado " + new Date(data.actualizado || Date.now()).toLocaleTimeString("es-419", { hour: "2-digit", minute: "2-digit" });
   }
 
+  function fmtFechaHora(iso) {
+    return new Date(iso).toLocaleString("es-419", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  }
+
+  function buildUserTable(titulo, filas) {
+    var card = el("div", { class: "card" });
+    card.appendChild(el("div", { class: "section-title", text: titulo }));
+    card.appendChild(el("div", { class: "section-desc", text: filas.length + (filas.length === 1 ? " usuario" : " usuarios") }));
+    if (filas.length === 0) {
+      card.appendChild(el("div", { class: "section-desc", text: "Todavía no hay nadie en esta lista." }));
+      return card;
+    }
+    var wrap = el("div", { class: "user-table-wrap" });
+    var table = el("div", { class: "user-table" });
+    table.appendChild(el("div", { class: "user-row header" }, [
+      el("div", { text: "Nombre" }),
+      el("div", { text: "ID de usuario" }),
+      el("div", { text: "Agente" }),
+      el("div", { text: "Fecha" }),
+    ]));
+    filas.forEach(function (f) {
+      table.appendChild(el("div", { class: "user-row" }, [
+        el("div", { class: "user-nombre" + (f.nombre ? "" : " sin-nombre"), text: f.nombre || "(nombre no disponible aún)" }),
+        el("div", { class: "user-id", text: f.contactoId }),
+        el("div", { text: f.agente }),
+        el("div", { class: "user-fecha", text: fmtFechaHora(f.fecha) }),
+      ]));
+    });
+    wrap.appendChild(table);
+    card.appendChild(wrap);
+    return card;
+  }
+
+  function renderUsuariosView(data) {
+    var content = el("div");
+    content.appendChild(el("section", {}, [buildUserTable("Usuarios registrados", data.registros || [])]));
+    content.appendChild(el("section", {}, [buildUserTable("Usuarios con FTD", data.ftds || [])]));
+    renderContentState(content);
+    document.getElementById("updated-label").textContent =
+      "Actualizado " + new Date(data.actualizado || Date.now()).toLocaleTimeString("es-419", { hour: "2-digit", minute: "2-digit" });
+  }
+
   function loadMetrics(manual, accessToken) {
     currentAccessToken = accessToken;
     var refreshBtn = document.getElementById("refresh-btn");
     if (refreshBtn) { refreshBtn.disabled = true; refreshBtn.textContent = "Actualizando…"; }
     if (manual) renderLoading();
 
+    var endpoint = currentView === "usuarios" ? "/usuarios" : "/metrics";
     var qs = "";
     if (currentView === "dashboard" && currentDesde && currentHasta) {
       qs = "?desde=" + encodeURIComponent(currentDesde) + "&hasta=" + encodeURIComponent(currentHasta);
     }
 
-    fetch("/metrics" + qs, { headers: { Authorization: "Bearer " + accessToken } })
+    fetch(endpoint + qs, { headers: { Authorization: "Bearer " + accessToken } })
       .then(function (res) {
         if (res.status === 401) throw new Error("Tu sesión venció, volvé a iniciar sesión.");
         if (res.status === 403) throw new Error("Tu cuenta todavía no tiene acceso configurado. Pedile al director que te habilite.");
@@ -1221,10 +1296,11 @@
         currentRol = data.rol;
         if (currentView === "ranking") renderRankingView(data);
         else if (currentView === "inactividad") renderInactividadView(data);
+        else if (currentView === "usuarios") renderUsuariosView(data);
         else renderData(data);
       })
       .catch(function (err) {
-        renderError(err.message || "No se pudo obtener /metrics.");
+        renderError(err.message || "No se pudo obtener los datos.");
       })
       .finally(function () {
         if (refreshBtn) { refreshBtn.disabled = false; refreshBtn.textContent = "Actualizar"; }
