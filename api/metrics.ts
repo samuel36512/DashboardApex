@@ -31,6 +31,8 @@ const AGENTE_TIER: Record<string, "ejecutivo" | "junior"> = {
   "Diego Alejandro Mora": "junior",
   "Daniela Charry": "junior",
   "Ana Sánchez": "junior",
+  "Laura Charry": "junior",
+  "Andry Camacho": "junior",
 };
 const TASA_EJECUTIVO_COP = Number(process.env.TASA_PAUTA_EJECUTIVO_COP ?? 100000);
 const TASA_JUNIOR_COP = Number(process.env.TASA_PAUTA_JUNIOR_COP ?? 50000);
