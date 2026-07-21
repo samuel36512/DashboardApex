@@ -177,6 +177,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const rowsVenta: { contacto_id: string; agente: string; tipo: "venta"; monto: number; comision: number; producto: string; contacto_nombre: string; fecha: string }[] = [];
     const noReconocidos = new Set<string>();
+    const sinFechaConocidos: { agente: string; cliente: string; producto: string; fechaCruda: string }[] = [];
     let ultimaFechaValida = "";
     let sinFecha = 0;
 
@@ -205,6 +206,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       if (!fechaIso) {
         sinFecha++;
+        // Si la fila SI es de uno de nuestros agentes, vale la pena saberlo -
+        // significa que se esta perdiendo una venta real por falta de fecha,
+        // no solo filas de gente ajena al equipo.
+        const agenteConocido = mapearAgente(agenteSheet, agentesActivos);
+        if (agenteConocido) {
+          sinFechaConocidos.push({ agente: agenteConocido, cliente, producto, fechaCruda });
+        }
         continue;
       }
 
@@ -243,6 +251,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       filasLeidas: filas.length - headerIdx - 2,
       ventasGuardadas: rowsVenta.length,
       sinFecha,
+      sinFechaDeMiEquipo: sinFechaConocidos,
       agentesNoReconocidos: Array.from(noReconocidos),
       muestra: rowsVenta.slice(0, 3).map((r) => ({
         cliente: r.contacto_nombre,
