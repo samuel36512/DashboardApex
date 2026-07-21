@@ -1500,11 +1500,7 @@
         return ca - cb;
       });
       var costoRealCard = el("div", { class: "card" });
-      costoRealCard.appendChild(el("div", { class: "section-title", text: "Costo por FTD real (según gasto y leads)" }));
-      costoRealCard.appendChild(el("div", {
-        class: "section-desc",
-        text: "Costo por lead de la oficina (" + currencyCOP.format(costoLeadCOP) + " = " + currencyCOP.format(data.totalInvertidoPautaCOP || 0) + " invertidos ÷ " + (data.totalLeadsMes || 0).toLocaleString("en-US") + " leads este mes). Gasto real de cada agente = leads propios × ese costo, ÷ sus FTD.",
-      }));
+      costoRealCard.appendChild(el("div", { class: "section-title", text: "Costo por FTD" }));
       ordenadosReal.forEach(function (a, i) {
         var esMejor = i === 0 && a.costoPorFtdRealCOP !== null;
         costoRealCard.appendChild(el("div", { class: "cost-row" + (esMejor ? " best" : "") }, [
