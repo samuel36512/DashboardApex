@@ -224,7 +224,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .map((s: string) => s.trim())
             .filter(Boolean)
             .pop() || "";
-        const firma = `${row.agente}|${row.producto}|${row.monto}|${row.fecha}|${correo.toLowerCase()}`;
+        // row.monto viene de una columna "numeric" de Postgres - Supabase la
+        // devuelve como texto (ej. "580.00"), no como number. row.fecha
+        // tambien puede volver con un formato de texto distinto al que arma
+        // fechaIso mas abajo (ej. "+00:00" en vez de ".000Z") aunque sea el
+        // mismo instante. Si no se normalizan los dos exactamente igual que
+        // del lado recien calculado, la firma nunca coincide con nada y esta
+        // barrera queda sin efecto silenciosamente (que es lo que estaba
+        // pasando).
+        const firma = `${row.agente}|${row.producto}|${Number(row.monto)}|${new Date(row.fecha).toISOString()}|${correo.toLowerCase()}`;
         firmasExistentes.set(firma, row.contacto_id);
       }
       if (!page || page.length < PAGE_FIRMAS) break;
