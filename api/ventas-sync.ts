@@ -71,11 +71,16 @@ function mapearAgente(sheetNombre: string, agentesActivos: string[]): string | n
   return null;
 }
 
-// La hoja solo trae el dia (ej. "1 jul 2026"), sin hora - se usa el
-// mediodia UTC como instante representativo para que nunca caiga en el dia
-// equivocado sin importar la zona horaria desde la que se filtre despues.
+// La hoja trae el dia (ej. "1 jul 2026"), a veces con una hora pegada
+// despues de una coma (ej. "17 jul 2026, 21:39") - se ignora la hora (no es
+// confiable para todas las filas) y se usa el mediodia UTC como instante
+// representativo para que nunca caiga en el dia equivocado sin importar la
+// zona horaria desde la que se filtre despues.
 function parseFechaSheet(s: string): string | null {
-  const m = s.trim().toLowerCase().match(/^(\d{1,2})\s+([a-z]{3})\s+(\d{4})$/);
+  const m = s
+    .trim()
+    .toLowerCase()
+    .match(/^(\d{1,2})\s+([a-z]{3})\s+(\d{4})(?:\s*,.*)?$/);
   if (!m) return null;
   const mes = MESES_FECHA[m[2]];
   if (mes === undefined) return null;
