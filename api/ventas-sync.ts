@@ -169,16 +169,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // Si el cron (u otro disparador) reintenta por timeout mientras la
   // sincronizacion anterior todavia esta corriendo, dos ejecuciones casi
-  // simultaneas pueden leer la base ANTES de que ninguna haya guardado nada
-  // todavia, y las dos terminan insertando todo - duplicando el mes entero
-  // de una sola vez. Se usa sync_state como traba: si hay un candado
-  // reciente, se corta de una en vez de arrancar una segunda pasada.
+  // simultaneas pueden pisarse y las dos terminan insertando todo -
+  // duplicando el mes entero de una sola vez. Un "leer y despues escribir"
+  // NO alcanza (las dos pueden leer "libre" en el mismo instante) - se usa
+  // un INSERT puro, que en la base es atomico: si dos ejecuciones lo
+  // intentan al mismo tiempo, la base solo deja pasar una y la otra recibe
+  // un error de conflicto (23505), sin importar el timing.
   const { data: candadoRow } = await supabase.from("sync_state").select("value").eq("key", LOCK_KEY).maybeSingle();
   const candadoDesde = candadoRow?.value ? new Date(candadoRow.value as string).getTime() : 0;
-  if (candadoDesde && Date.now() - candadoDesde < LOCK_VIGENCIA_MS) {
-    return res.status(409).json({ error: "Ya hay una sincronizacion de ventas en curso, esperá un momento y volvé a intentar." });
+  if (candadoDesde && Date.now() - candadoDesde >= LOCK_VIGENCIA_MS) {
+    // Candado viejo (de una corrida anterior que no lo libero bien) - se
+    // limpia antes de intentar tomarlo de nuevo.
+    await supabase.from("sync_state").delete().eq("key", LOCK_KEY);
   }
-  await supabase.from("sync_state").upsert({ key: LOCK_KEY, value: new Date().toISOString() });
+  const { error: candadoError } = await supabase
+    .from("sync_state")
+    .insert({ key: LOCK_KEY, value: new Date().toISOString() });
+  if (candadoError) {
+    if (candadoError.code === "23505") {
+      return res.status(409).json({ error: "Ya hay una sincronizacion de ventas en curso, esperá un momento y volvé a intentar." });
+    }
+    return res.status(500).json({ error: "Error tomando el candado de sincronizacion: " + candadoError.message });
+  }
 
   try {
     const token = await getAccessToken(credsJson);
