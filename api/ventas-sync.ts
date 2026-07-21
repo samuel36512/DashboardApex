@@ -283,23 +283,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const montoParsed = parsePrecio(precioCrudo);
       const productoFinal = producto || "Sin especificar";
+      const orden = (fila[5] || "").toString().trim();
       // El ID se arma SOLO con valores ya normalizados (nunca texto crudo de
       // la hoja): fechaIso en vez de fechaCruda (algunas filas traen la hora
       // pegada a la fecha y esa hora no es estable entre sincronizaciones), y
       // el precio ya parseado a numero en vez del texto con formato de
       // moneda. Texto crudo inestable = un ID nuevo en cada sincronizacion =
       // la misma venta duplicada sin parar.
-      const contactoId = idVenta((fila[5] || "").toString().trim(), clienteId, fechaIso, producto, String(montoParsed));
+      const contactoId = idVenta(orden, clienteId, fechaIso, producto, String(montoParsed));
 
-      const firma = `${agente}|${productoFinal}|${montoParsed}|${fechaIso}|${clienteId.toLowerCase()}`;
-      const idExistente = firmasExistentes.get(firma);
-      if (idExistente && idExistente !== contactoId) {
-        // Ya hay una venta identica guardada con OTRO id (el calculo del ID
-        // cambio) - no se crea una fila nueva, se deja la que ya esta.
-        duplicadosEvitados++;
-        continue;
+      // La barrera por firma de negocio SOLO aplica cuando no hay numero de
+      // orden - si la hoja trae orden, esa fila ya es inequivoca por si sola
+      // (dos ventas reales del mismo cliente, mismo producto y mismo dia,
+      // con ordenes distintas, no deben confundirse entre si).
+      if (!orden) {
+        const firma = `${agente}|${productoFinal}|${montoParsed}|${fechaIso}|${clienteId.toLowerCase()}`;
+        const idExistente = firmasExistentes.get(firma);
+        if (idExistente && idExistente !== contactoId) {
+          // Ya hay una venta identica guardada con OTRO id (el calculo del ID
+          // cambio) - no se crea una fila nueva, se deja la que ya esta.
+          duplicadosEvitados++;
+          continue;
+        }
+        firmasExistentes.set(firma, contactoId);
       }
-      firmasExistentes.set(firma, contactoId);
 
       rowsVenta.push({
         contacto_id: contactoId,
