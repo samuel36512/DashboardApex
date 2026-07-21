@@ -495,6 +495,29 @@
   }
   .cost-row.best .cost-value { color: var(--good); }
 
+  /* ---- Boton de pauta activa/desactivada ---- */
+  .pauta-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .pauta-info { font-size: 12px; color: var(--text-muted); }
+  .pauta-toggle-btn {
+    border: none;
+    border-radius: 8px;
+    padding: 10px 18px;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    cursor: pointer;
+    color: #fff;
+    background: var(--danger);
+  }
+  .pauta-toggle-btn.off { background: var(--good); color: #0a0908; }
+  .pauta-toggle-btn:disabled { opacity: 0.6; cursor: default; }
+
   /* ---- Estado critico ---- */
   .critico-title {
     font-size: 16px;
@@ -1476,6 +1499,28 @@
         ]));
       });
       content.appendChild(el("section", {}, [costoCard]));
+
+      if (data.rol === "director") {
+        var pautaActiva = data.pautaActiva !== false;
+        var diasActivosTxt = (Number(data.diasActivosPauta) || 0).toLocaleString("es-CO", { maximumFractionDigits: 2 });
+        var diaDelMesTxt = data.diaDelMesPauta != null ? data.diaDelMesPauta : "?";
+        var pautaCard = el("div", { class: "card pauta-card" }, [
+          el("div", { class: "pauta-info", text: "Días de pauta activa este mes: " + diasActivosTxt + " de " + diaDelMesTxt + " transcurridos." }),
+        ]);
+        var pautaBtn = el("button", {
+          class: "pauta-toggle-btn" + (pautaActiva ? "" : " off"),
+          text: pautaActiva ? "PAUTA DESACTIVADA" : "PAUTA ACTIVADA",
+        });
+        pautaBtn.addEventListener("click", function () {
+          pautaBtn.disabled = true;
+          fetch("/pauta-estado", { method: "POST", headers: { Authorization: "Bearer " + currentAccessToken } })
+            .then(function (r) { return r.json(); })
+            .then(function () { loadMetrics(true, currentAccessToken); })
+            .catch(function () { pautaBtn.disabled = false; });
+        });
+        pautaCard.appendChild(pautaBtn);
+        content.appendChild(el("section", {}, [pautaCard]));
+      }
 
       var totalInvertidoCOP = conCosto.reduce(function (acc, a) { return acc + (a.gastoPautaCOP || 0); }, 0);
       var totalFtdsMesCosto = conCosto.reduce(function (acc, a) { return acc + (a.ftdsMes || 0); }, 0);

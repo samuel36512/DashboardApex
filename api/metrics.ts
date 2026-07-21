@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getSupabase } from "./_lib/supabase";
-import { AGENTE_TIER, diaDelMesColombia, tasaDiariaCOP } from "./_lib/agentTier";
+import { AGENTE_TIER, tasaDiariaCOP } from "./_lib/agentTier";
+import { getDiasActivosPautaMes } from "./_lib/pautaEstado";
 
 interface AgentAgg {
   leads: number;
@@ -128,7 +129,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // rango personalizado. FTD incluye el historico sembrado a mano (ya
   // viene atribuido a un agente puntual), es el total real del mes.
   const ahoraCo = new Date(Date.now() - 5 * 60 * 60 * 1000);
-  const diaDelMes = diaDelMesColombia();
+  const { diasActivos: diasActivosPauta, diaDelMes: diaDelMesPauta, activa: pautaActiva } = await getDiasActivosPautaMes(supabase);
   const desdeMesCo = new Date(
     Date.UTC(ahoraCo.getUTCFullYear(), ahoraCo.getUTCMonth(), 1, 5, 0, 0)
   ).toISOString();
@@ -187,7 +188,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const tier = AGENTE_TIER[agente];
       const ftdsMes = ftdsMesPorAgente.get(agente) ?? 0;
       const tasaDiaria = tasaDiariaCOP(agente);
-      const gastoPautaCOP = tasaDiaria !== null ? tasaDiaria * diaDelMes : null;
+      const gastoPautaCOP = tasaDiaria !== null ? Math.round(tasaDiaria * diasActivosPauta) : null;
       const costoPorFtdCOP = gastoPautaCOP !== null && ftdsMes > 0 ? Math.round(gastoPautaCOP / ftdsMes) : null;
       const membresiasMes = membresiasMesPorAgente.get(agente) ?? 0;
       return {
@@ -223,6 +224,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   return res.status(200).json({
     agentes: agentesFiltrados,
     metaVentasUSD: Number(process.env.META_VENTAS_USD ?? 2400),
+    pautaActiva,
+    diasActivosPauta: Math.round(diasActivosPauta * 100) / 100,
+    diaDelMesPauta,
     actualizado: new Date().toISOString(),
     rol,
     filtro: { desde: desde || null, hasta: hasta || null },

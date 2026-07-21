@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getSupabase } from "./_lib/supabase";
-import { diaDelMesColombia, tasaDiariaCOP } from "./_lib/agentTier";
+import { tasaDiariaCOP } from "./_lib/agentTier";
+import { getDiasActivosPautaMes } from "./_lib/pautaEstado";
 
 // Tasa por FTD del equipo que gana el director, y el umbral (FTD del mes)
 // a partir del cual sube de $3 a $4 por FTD. Configurables por si cambian.
@@ -112,10 +113,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // mismo dia-del-mes y las mismas tasas que "Conversion de FTDs", y como
   // desde/hasta ya vienen fijados al mes en curso para esta vista, a.ftds
   // ya es el conteo real del mes (no hace falta una consulta aparte).
-  const diaDelMes = diaDelMesColombia();
+  const { diasActivos: diasActivosPauta } = await getDiasActivosPautaMes(supabase);
   const agentesArr = Array.from(byAgent.entries()).map(([agente, a]) => {
     const tasaDiaria = tasaDiariaCOP(agente);
-    const gastoPautaCOP = tasaDiaria !== null ? tasaDiaria * diaDelMes : null;
+    const gastoPautaCOP = tasaDiaria !== null ? Math.round(tasaDiaria * diasActivosPauta) : null;
     const costoPorFtdCOP = gastoPautaCOP !== null && a.ftds > 0 ? Math.round(gastoPautaCOP / a.ftds) : null;
     return { agente, ftds: a.ftds, ventasUSD: a.ventasUSD, costoPorFtdCOP };
   });

@@ -26,3 +26,16 @@ create index if not exists idx_eventos_tipo on eventos (tipo);
 
 -- Sin políticas: solo la service_role key (usada por el backend) puede leer o escribir.
 alter table eventos enable row level security;
+
+-- Estado del boton "Pauta desactivada": una sola fila (id=1) que registra si
+-- la pauta esta activa ahora mismo y cuantos dias del mes en curso estuvo
+-- realmente APAGADA, para que "Costo por FTD" reste esos dias en vez de
+-- asumir que el anuncio corrio todos los dias del mes.
+create table if not exists pauta_estado (
+  id int primary key,
+  activa boolean not null default true,
+  desde timestamptz not null default now(),
+  dias_inactivos_mes numeric not null default 0,
+  periodo text not null
+);
+alter table pauta_estado enable row level security;
