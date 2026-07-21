@@ -156,7 +156,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ? `${mesParam} ventas plataforma`
       : `${MESES_TAB[ahora.getMonth()]} ventas plataforma`;
 
-    const range = encodeURIComponent(`${tabName}!A1:J1500`);
+    // Rango abierto (sin limite de fila): la pestaña es de toda la empresa y
+    // crece durante el mes - un limite fijo (ej. J1500) corta las ventas mas
+    // recientes en cuanto la pestaña pasa esa cantidad de filas.
+    const range = encodeURIComponent(`${tabName}!A:J`);
     const valuesRes = await fetch(`${SHEETS_BASE}/${sheetId}/values/${range}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
