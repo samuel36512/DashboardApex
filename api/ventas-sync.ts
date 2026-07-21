@@ -218,6 +218,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (!cliente || !precioCrudo || !agenteSheet) continue;
 
+      // Algunas filas traen "Nombre\ncorreo" en la celda del cliente y otras
+      // veces solo el correo (la hoja cambia con el tiempo) - se usa siempre
+      // la ULTIMA linea (el correo, que es lo estable) para el ID, para que
+      // la misma venta no genere un ID distinto segun como venga esa celda.
+      const clienteId = cliente.split("\n").map((s) => s.trim()).filter(Boolean).pop() || cliente;
+
       // Google Sheets devuelve "" en filas con la fecha visualmente
       // combinada con la de arriba - se arrastra la ultima fecha valida
       // vista en el orden en que vienen las filas.
@@ -252,7 +258,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // combinada) se usa fechaIso como respaldo, para que esa fila puntual
         // tenga un ID estable en vez de cambiar segun si Sheets devuelve la
         // celda vacia o llena en cada sincronizacion.
-        contacto_id: idVenta((fila[5] || "").toString().trim(), cliente, fechaCruda || fechaIso, producto, precioCrudo),
+        contacto_id: idVenta((fila[5] || "").toString().trim(), clienteId, fechaCruda || fechaIso, producto, precioCrudo),
         agente,
         tipo: "venta",
         monto: parsePrecio(precioCrudo),
