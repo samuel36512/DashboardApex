@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getSupabase } from "./_lib/supabase";
+import { EMPRESA_ID_ACTUAL } from "./_lib/empresaActual";
 
 // Mismo estimado por FTD que se usa en "Ranking mejores pagos" para que
 // los dos numeros del agente coincidan.
@@ -59,6 +60,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .from("eventos")
       .select("tipo, monto, comision, producto")
       .eq("agente", miNombre)
+      .eq("empresa_id", EMPRESA_ID_ACTUAL)
       .in("tipo", ["ftd", "venta"])
       .range(offset, offset + PAGE - 1);
     if (desde) query = query.gte("fecha", desde);

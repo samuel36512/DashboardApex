@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getSupabase } from "./_lib/supabase";
+import { EMPRESA_ID_ACTUAL } from "./_lib/empresaActual";
 
 const GHL_BASE = "https://services.leadconnectorhq.com";
 const GHL_VERSION = "2021-07-28";
@@ -42,6 +43,7 @@ interface EventoRow {
   fecha: string;
   contacto_nombre?: string | null;
   contacto_telefono?: string | null;
+  empresa_id: number;
 }
 
 interface ContactDetails {
@@ -147,7 +149,7 @@ async function cargarEtapaPipeline(
 
       const fecha = fechaDe(o);
       if (new Date(fecha).getTime() > cutoffMs) {
-        rows.push({ contacto_id: o.contactId, agente, tipo, fecha });
+        rows.push({ contacto_id: o.contactId, agente, tipo, fecha, empresa_id: EMPRESA_ID_ACTUAL });
       }
     }
 
@@ -189,6 +191,7 @@ async function backfillNombres(headers: Record<string, string>, supabase: Supaba
   const { data: faltantes } = await supabase
     .from("eventos")
     .select("id, contacto_id")
+    .eq("empresa_id", EMPRESA_ID_ACTUAL)
     .in("tipo", ["registro", "ftd"])
     .or("contacto_nombre.is.null,contacto_telefono.is.null")
     .not("contacto_id", "like", "baseline-%")
@@ -255,7 +258,7 @@ async function syncAgente(
     for (const c of contacts) {
       contactosRevisados++;
       const fecha = c.dateAdded || c.dateUpdated || new Date().toISOString();
-      rows.push({ contacto_id: c.id, agente: agenteNombre, tipo: "lead", fecha });
+      rows.push({ contacto_id: c.id, agente: agenteNombre, tipo: "lead", fecha, empresa_id: EMPRESA_ID_ACTUAL });
     }
     if (rows.length > 0) {
       const { error } = await supabase.from("eventos").upsert(rows, { onConflict: "contacto_id,tipo" });
@@ -291,6 +294,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .from("agentes")
     .select("ghl_user_id, nombre")
     .eq("activo", true)
+    .eq("empresa_id", EMPRESA_ID_ACTUAL)
     .order("ghl_user_id");
   if (agentesError) {
     return res.status(500).json({ error: "No se pudo leer la tabla agentes", detail: agentesError.message });
@@ -301,10 +305,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   const agentesById = new Map(agentesList.map((a) => [a.ghl_user_id, a.nombre]));
 
-  const { data: cursorRow } = await supabase.from("sync_state").select("value").eq("key", CURSOR_KEY).maybeSingle();
+  const { data: cursorRow } = await supabase
+    .from("sync_state")
+    .select("value")
+    .eq("empresa_id", EMPRESA_ID_ACTUAL)
+    .eq("key", CURSOR_KEY)
+    .maybeSingle();
   const cursorState: CursorState = (cursorRow?.value as CursorState) || {};
 
-  const { data: cutoffRow } = await supabase.from("sync_state").select("value").eq("key", CUTOFF_KEY).maybeSingle();
+  const { data: cutoffRow } = await supabase
+    .from("sync_state")
+    .select("value")
+    .eq("empresa_id", EMPRESA_ID_ACTUAL)
+    .eq("key", CUTOFF_KEY)
+    .maybeSingle();
   const cutoffMs = cutoffRow?.value ? new Date(cutoffRow.value as string).getTime() : Date.now();
 
   const headers = {
@@ -391,11 +405,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     resumen.backfillNombres = await backfillNombres(headers, supabase, started);
   } catch (err: any) {
-    await supabase.from("sync_state").upsert({ key: CURSOR_KEY, value: nextCursor });
+    await supabase.from("sync_state").upsert({ key: CURSOR_KEY, value: nextCursor, empresa_id: EMPRESA_ID_ACTUAL });
     return res.status(502).json({ error: err?.message || "Error sincronizando con GHL", resumen });
   }
 
-  await supabase.from("sync_state").upsert({ key: CURSOR_KEY, value: nextCursor });
+  await supabase.from("sync_state").upsert({ key: CURSOR_KEY, value: nextCursor, empresa_id: EMPRESA_ID_ACTUAL });
 
   res.setHeader("Cache-Control", "no-store");
   return res.status(200).json({ ok: true, ...resumen });

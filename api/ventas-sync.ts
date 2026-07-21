@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import crypto from "crypto";
 import { getSupabase } from "./_lib/supabase";
 import { EMAIL_TO_AGENTE } from "./_lib/agentEmails";
+import { EMPRESA_ID_ACTUAL } from "./_lib/empresaActual";
 
 const SHEETS_BASE = "https://sheets.googleapis.com/v4/spreadsheets";
 
@@ -175,16 +176,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // un INSERT puro, que en la base es atomico: si dos ejecuciones lo
   // intentan al mismo tiempo, la base solo deja pasar una y la otra recibe
   // un error de conflicto (23505), sin importar el timing.
-  const { data: candadoRow } = await supabase.from("sync_state").select("value").eq("key", LOCK_KEY).maybeSingle();
+  const { data: candadoRow } = await supabase
+    .from("sync_state")
+    .select("value")
+    .eq("empresa_id", EMPRESA_ID_ACTUAL)
+    .eq("key", LOCK_KEY)
+    .maybeSingle();
   const candadoDesde = candadoRow?.value ? new Date(candadoRow.value as string).getTime() : 0;
   if (candadoDesde && Date.now() - candadoDesde >= LOCK_VIGENCIA_MS) {
     // Candado viejo (de una corrida anterior que no lo libero bien) - se
     // limpia antes de intentar tomarlo de nuevo.
-    await supabase.from("sync_state").delete().eq("key", LOCK_KEY);
+    await supabase.from("sync_state").delete().eq("empresa_id", EMPRESA_ID_ACTUAL).eq("key", LOCK_KEY);
   }
   const { error: candadoError } = await supabase
     .from("sync_state")
-    .insert({ key: LOCK_KEY, value: new Date().toISOString() });
+    .insert({ key: LOCK_KEY, value: new Date().toISOString(), empresa_id: EMPRESA_ID_ACTUAL });
   if (candadoError) {
     if (candadoError.code === "23505") {
       return res.status(409).json({ error: "Ya hay una sincronizacion de ventas en curso, esperá un momento y volvé a intentar." });
@@ -198,7 +204,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { data: agentesRows, error: agentesError } = await supabase
       .from("agentes")
       .select("nombre")
-      .eq("activo", true);
+      .eq("activo", true)
+      .eq("empresa_id", EMPRESA_ID_ACTUAL);
     if (agentesError) throw new Error(`Error leyendo agentes: ${agentesError.message}`);
     const agentesActivos = (agentesRows ?? []).map((a) => a.nombre);
 
@@ -215,6 +222,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .from("eventos")
         .select("contacto_id, agente, producto, monto, fecha, contacto_nombre")
         .eq("tipo", "venta")
+        .eq("empresa_id", EMPRESA_ID_ACTUAL)
         .range(offset, offset + PAGE_FIRMAS - 1);
       if (error) throw new Error(`Error leyendo ventas existentes: ${error.message}`);
       for (const row of page ?? []) {
@@ -264,7 +272,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(502).json({ error: `No encontre la fila de encabezado ("FECHA"/"AGENTE") en la pestaña "${tabName}"` });
     }
 
-    const rowsVenta: { contacto_id: string; agente: string; tipo: "venta"; monto: number; comision: number; producto: string; contacto_nombre: string; fecha: string }[] = [];
+    const rowsVenta: { contacto_id: string; agente: string; tipo: "venta"; monto: number; comision: number; producto: string; contacto_nombre: string; fecha: string; empresa_id: number }[] = [];
     const noReconocidos = new Set<string>();
     const sinFechaConocidos: { agente: string; cliente: string; producto: string; fechaCruda: string }[] = [];
     let ultimaFechaValida = "";
@@ -354,6 +362,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         producto: productoFinal,
         contacto_nombre: cliente,
         fecha: fechaIso,
+        empresa_id: EMPRESA_ID_ACTUAL,
       });
     }
 
@@ -387,6 +396,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } catch (err: any) {
     return res.status(502).json({ error: err?.message || "Error sincronizando ventas" });
   } finally {
-    await supabase.from("sync_state").delete().eq("key", LOCK_KEY);
+    await supabase.from("sync_state").delete().eq("empresa_id", EMPRESA_ID_ACTUAL).eq("key", LOCK_KEY);
   }
 }

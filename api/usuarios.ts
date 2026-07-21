@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getSupabase } from "./_lib/supabase";
+import { EMPRESA_ID_ACTUAL } from "./_lib/empresaActual";
 
 const LIMITE = 500;
 
@@ -48,6 +49,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .from("eventos")
       .select("contacto_id, contacto_nombre, contacto_telefono, agente, fecha")
       .eq("tipo", tipo)
+      .eq("empresa_id", EMPRESA_ID_ACTUAL)
       .not("contacto_id", "like", "baseline-%")
       .order("fecha", { ascending: false })
       .limit(LIMITE);
@@ -82,6 +84,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .from("agentes")
         .select("nombre")
         .eq("activo", true)
+        .eq("empresa_id", EMPRESA_ID_ACTUAL)
         .order("nombre");
       if (agentesError) throw new Error(`Error leyendo agentes: ${agentesError.message}`);
       agentesActivos = (agentesRows ?? []).map((a) => a.nombre);

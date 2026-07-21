@@ -1,8 +1,14 @@
 import type { getSupabase } from "./supabase";
 import { diaDelMesColombia } from "./agentTier";
+import { EMPRESA_ID_ACTUAL } from "./empresaActual";
 
 type Supabase = ReturnType<typeof getSupabase>;
 
+// NOTA MIGRACION: por ahora se sigue usando id=1 como fila unica (todavia
+// no se corrio la migracion que hace empresa_id la clave primaria de esta
+// tabla) - este archivo se actualiza para usar empresa_id en el mismo paso
+// en que se corre esa migracion (ver plan de multi-empresa), no antes,
+// porque hasta ese momento la columna "id" todavia existe y es la clave.
 const PAUTA_ROW_ID = 1;
 
 function periodoActualColombia(): string {
@@ -66,6 +72,7 @@ export async function toggleActiva(supabase: Supabase): Promise<{ activa: boolea
   const nuevaActiva = !estado.activa;
   const { error } = await supabase.from("pauta_estado").upsert({
     id: PAUTA_ROW_ID,
+    empresa_id: EMPRESA_ID_ACTUAL,
     activa: nuevaActiva,
     desde: ahora.toISOString(),
     dias_inactivos_mes: diasInactivosMes,

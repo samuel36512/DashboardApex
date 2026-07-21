@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getSupabase } from "./_lib/supabase";
 import { AGENTE_TIER, tasaDiariaCOP } from "./_lib/agentTier";
 import { getDiasActivosPautaMes } from "./_lib/pautaEstado";
+import { EMPRESA_ID_ACTUAL } from "./_lib/empresaActual";
 
 interface AgentAgg {
   leads: number;
@@ -50,7 +51,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { data: agentesRows, error: agentesError } = await supabase
     .from("agentes")
     .select("nombre")
-    .eq("activo", true);
+    .eq("activo", true)
+    .eq("empresa_id", EMPRESA_ID_ACTUAL);
   if (agentesError) {
     return res.status(500).json({ error: "Error leyendo agentes" });
   }
@@ -65,7 +67,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // traer todo, si no los conteos quedan cortados.
   const PAGE = 1000;
   for (let offset = 0; ; offset += PAGE) {
-    let query = supabase.from("eventos").select("agente, tipo, monto, comision").range(offset, offset + PAGE - 1);
+    let query = supabase
+      .from("eventos")
+      .select("agente, tipo, monto, comision")
+      .eq("empresa_id", EMPRESA_ID_ACTUAL)
+      .range(offset, offset + PAGE - 1);
     // desde/hasta vienen del front como instante UTC completo (ya resuelto
     // desde el dia calendario LOCAL del director, no UTC) - si llegan como
     // fecha simple "YYYY-MM-DD" (uso directo de la API, sin el front), se
@@ -109,6 +115,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { data: page, error } = await supabase
       .from("eventos")
       .select("agente, fecha, tipo")
+      .eq("empresa_id", EMPRESA_ID_ACTUAL)
       .in("tipo", ["registro", "ftd"])
       .not("contacto_id", "like", "baseline-%")
       .gte("fecha", unMesAtras)
@@ -139,6 +146,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .from("eventos")
       .select("agente")
       .eq("tipo", "ftd")
+      .eq("empresa_id", EMPRESA_ID_ACTUAL)
       .gte("fecha", desdeMesCo)
       .range(offset, offset + PAGE - 1);
     if (error) {
@@ -162,6 +170,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .from("eventos")
       .select("agente, producto")
       .eq("tipo", "venta")
+      .eq("empresa_id", EMPRESA_ID_ACTUAL)
       .gte("fecha", desdeMesCo)
       .range(offset, offset + PAGE - 1);
     if (error) {
@@ -187,6 +196,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .from("eventos")
       .select("agente")
       .eq("tipo", "lead")
+      .eq("empresa_id", EMPRESA_ID_ACTUAL)
       .gte("fecha", desdeMesCo)
       .range(offset, offset + PAGE - 1);
     if (error) {

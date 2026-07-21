@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getSupabase } from "../_lib/supabase";
 import { parsePayload, timingSafeEqual } from "../_lib/validation";
+import { EMPRESA_ID_ACTUAL } from "../_lib/empresaActual";
 
 const TIPOS = new Set(["lead", "registro", "ftd", "venta"]);
 
@@ -35,7 +36,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { error } = await supabase
     .from("eventos")
     .upsert(
-      { contacto_id, agente, tipo, monto: monto ?? null, fecha },
+      { contacto_id, agente, tipo, monto: monto ?? null, fecha, empresa_id: EMPRESA_ID_ACTUAL },
       { onConflict: "contacto_id,tipo" }
     );
 

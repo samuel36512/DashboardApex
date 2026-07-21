@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getSupabase } from "./_lib/supabase";
 import { tasaDiariaCOP } from "./_lib/agentTier";
 import { getDiasActivosPautaMes } from "./_lib/pautaEstado";
+import { EMPRESA_ID_ACTUAL } from "./_lib/empresaActual";
 
 // Tasa por FTD del equipo que gana el director, y el umbral (FTD del mes)
 // a partir del cual sube de $3 a $4 por FTD. Configurables por si cambian.
@@ -52,7 +53,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { data: agentesRows, error: agentesError } = await supabase
     .from("agentes")
     .select("nombre")
-    .eq("activo", true);
+    .eq("activo", true)
+    .eq("empresa_id", EMPRESA_ID_ACTUAL);
   if (agentesError) {
     return res.status(500).json({ error: "Error leyendo agentes" });
   }
@@ -71,6 +73,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .from("eventos")
       .select("agente, tipo, monto, producto")
       .in("tipo", ["ftd", "venta", "lead"])
+      .eq("empresa_id", EMPRESA_ID_ACTUAL)
       .range(offset, offset + PAGE - 1);
     if (desde) query = query.gte("fecha", desde);
     if (hasta) query = query.lte("fecha", hasta.includes("T") ? hasta : `${hasta}T23:59:59.999Z`);

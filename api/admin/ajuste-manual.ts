@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import crypto from "node:crypto";
 import { getSupabase } from "../_lib/supabase";
 import { getAccessToken, requireDirector } from "../_lib/auth";
+import { EMPRESA_ID_ACTUAL } from "../_lib/empresaActual";
 
 const TIPOS_VALIDOS = ["lead", "registro", "ftd"] as const;
 const CANTIDAD_MAXIMA = 200;
@@ -59,6 +60,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .select("id, nombre")
     .eq("id", agenteId)
     .eq("activo", true)
+    .eq("empresa_id", EMPRESA_ID_ACTUAL)
     .maybeSingle();
   if (agenteError || !agente) {
     return res.status(400).json({ error: "Agente no encontrado" });
@@ -72,6 +74,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     agente: agente.nombre,
     tipo,
     fecha,
+    empresa_id: EMPRESA_ID_ACTUAL,
   }));
 
   const { error: insertError } = await supabase.from("eventos").upsert(filas, { onConflict: "contacto_id,tipo" });
