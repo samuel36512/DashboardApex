@@ -150,8 +150,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (agentesError) throw new Error(`Error leyendo agentes: ${agentesError.message}`);
     const agentesActivos = (agentesRows ?? []).map((a) => a.nombre);
 
+    const mesParam = typeof req.query.mes === "string" ? req.query.mes.trim() : "";
     const ahora = new Date();
-    const tabName = `${MESES_TAB[ahora.getMonth()]} ventas plataforma`;
+    const tabName = mesParam
+      ? `${mesParam} ventas plataforma`
+      : `${MESES_TAB[ahora.getMonth()]} ventas plataforma`;
 
     const range = encodeURIComponent(`${tabName}!A1:J1500`);
     const valuesRes = await fetch(`${SHEETS_BASE}/${sheetId}/values/${range}`, {
@@ -238,6 +241,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ventasGuardadas: rowsVenta.length,
       sinFecha,
       agentesNoReconocidos: Array.from(noReconocidos),
+      muestra: rowsVenta.slice(0, 3).map((r) => ({
+        cliente: r.contacto_nombre,
+        agente: r.agente,
+        producto: r.producto,
+        fecha: r.fecha,
+      })),
     });
   } catch (err: any) {
     return res.status(502).json({ error: err?.message || "Error sincronizando ventas" });
