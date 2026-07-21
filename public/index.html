@@ -1553,7 +1553,7 @@
       costoRealCard.appendChild(el("div", { class: "section-title", text: "Costo por FTD real (según gasto y leads)" }));
       costoRealCard.appendChild(el("div", {
         class: "section-desc",
-        text: "Costo por lead de la oficina (" + currencyCOP.format(costoLeadCOP) + " = " + currencyCOP.format(data.totalInvertidoPautaCOP || 0) + " invertidos ÷ " + (data.totalLeadsMes || 0).toLocaleString("en-US") + " leads este mes) × FTD de cada agente este mes.",
+        text: "Costo por lead de la oficina (" + currencyCOP.format(costoLeadCOP) + " = " + currencyCOP.format(data.totalInvertidoPautaCOP || 0) + " invertidos ÷ " + (data.totalLeadsMes || 0).toLocaleString("en-US") + " leads este mes). Gasto real de cada agente = leads propios × ese costo, ÷ sus FTD.",
       }));
       ordenadosReal.forEach(function (a, i) {
         var esMejor = i === 0 && a.costoPorFtdRealCOP !== null;
@@ -1564,8 +1564,8 @@
             a.tier ? el("div", { class: "cost-tier " + a.tier, text: a.tier === "ejecutivo" ? "Ejecutivo" : "Junior" }) : null,
           ]),
           el("div", { class: "cost-detail" }, [
-            el("span", { text: a.ftdsMes + (a.ftdsMes === 1 ? " FTD" : " FTDs") + " este mes" }),
-            el("span", { text: (a.leadsMes || 0) + ((a.leadsMes || 0) === 1 ? " lead" : " leads") + " este mes" }),
+            el("span", { text: (a.leadsMes || 0) + ((a.leadsMes || 0) === 1 ? " lead" : " leads") + " → " + a.ftdsMes + (a.ftdsMes === 1 ? " FTD" : " FTDs") }),
+            el("span", { text: currencyCOP.format(a.gastoRealCOP || 0) + " invertidos" }),
           ]),
           el("div", { class: "cost-value", text: a.costoPorFtdRealCOP !== null ? currencyCOP.format(a.costoPorFtdRealCOP) : "Sin FTD" }),
         ]));

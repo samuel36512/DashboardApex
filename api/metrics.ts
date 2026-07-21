@@ -239,18 +239,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // "Costo por lead" real de toda la oficina: la pauta diaria acumulada por
   // tier (arriba) sigue exactamente igual, pero ademas se reparte el gasto
-  // REAL total entre todos los leads que entraron este mes, y ese costo por
-  // lead se multiplica por los FTD de cada agente - es el "costo por FTD
-  // real" que pidio el director, basado en el gasto real y no solo en la
-  // tarifa fija por tier.
+  // REAL total entre todos los leads que entraron este mes. Ese costo por
+  // lead, multiplicado por los leads que le llegaron a CADA agente, da el
+  // gasto publicitario real de ese agente - y ese gasto dividido entre sus
+  // FTD da el "costo por FTD real" que pidio el director (ej. Luna Sandoval,
+  // 140 leads x $7.497 = $1.049.580 de gasto real).
   const totalInvertidoCOP = agentesBase.reduce((acc, a) => acc + (a.gastoPautaCOP || 0), 0);
   const costoPorLeadCOP = totalLeadsMes > 0 ? totalInvertidoCOP / totalLeadsMes : null;
 
   const agentes = agentesBase
-    .map((a) => ({
-      ...a,
-      costoPorFtdRealCOP: costoPorLeadCOP !== null ? Math.round(costoPorLeadCOP * a.ftdsMes) : null,
-    }))
+    .map((a) => {
+      const gastoRealCOP = costoPorLeadCOP !== null ? Math.round(costoPorLeadCOP * a.leadsMes) : null;
+      const costoPorFtdRealCOP = gastoRealCOP !== null && a.ftdsMes > 0 ? Math.round(gastoRealCOP / a.ftdsMes) : null;
+      return { ...a, gastoRealCOP, costoPorFtdRealCOP };
+    })
     .sort((a, b) => a.agente.localeCompare(b.agente));
 
   const rol = (perfil as any).rol as string;
