@@ -308,21 +308,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // la misma venta duplicada sin parar.
       const contactoId = idVenta(orden, clienteId, fechaIso, producto, String(montoParsed));
 
-      // La barrera por firma de negocio SOLO aplica cuando no hay numero de
-      // orden - si la hoja trae orden, esa fila ya es inequivoca por si sola
-      // (dos ventas reales del mismo cliente, mismo producto y mismo dia,
-      // con ordenes distintas, no deben confundirse entre si).
-      if (!orden) {
-        const firma = `${agente}|${productoFinal}|${montoParsed}|${fechaIso}|${clienteId.toLowerCase()}`;
-        const idExistente = firmasExistentes.get(firma);
-        if (idExistente && idExistente !== contactoId) {
-          // Ya hay una venta identica guardada con OTRO id (el calculo del ID
-          // cambio) - no se crea una fila nueva, se deja la que ya esta.
-          duplicadosEvitados++;
-          continue;
-        }
-        firmasExistentes.set(firma, contactoId);
+      // La barrera por firma de negocio aplica SIEMPRE, tenga o no numero de
+      // orden - la hoja es compartida por toda la empresa y crece todo el
+      // tiempo, asi que el numero de orden de una fila puede correrse con el
+      // tiempo (no es un ID fijo). Riesgo aceptado: si el mismo cliente
+      // compra el MISMO producto, al mismo precio, el mismo dia, dos veces
+      // de verdad, la segunda se salta - un caso raro, preferible a seguir
+      // duplicando ventas reales.
+      const firma = `${agente}|${productoFinal}|${montoParsed}|${fechaIso}|${clienteId.toLowerCase()}`;
+      const idExistente = firmasExistentes.get(firma);
+      if (idExistente && idExistente !== contactoId) {
+        // Ya hay una venta identica guardada con OTRO id (el calculo del ID
+        // cambio) - no se crea una fila nueva, se deja la que ya esta.
+        duplicadosEvitados++;
+        continue;
       }
+      firmasExistentes.set(firma, contactoId);
 
       rowsVenta.push({
         contacto_id: contactoId,
