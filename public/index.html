@@ -937,6 +937,7 @@
   var currentRol = null;
   var currentView = "welcome";
   var adminPanelOpen = false;
+  var ajustePanelOpen = false;
 
   var INACT_PRESETS = [
     { id: "4h", label: "4 horas", tipo: "horas", horas: 4, ventana: "en las últimas 4 horas" },
@@ -1096,6 +1097,7 @@
   function renderWelcome() {
     currentView = "welcome";
     adminPanelOpen = false;
+    ajustePanelOpen = false;
     app.innerHTML = "";
     var wrap = el("div", { class: "welcome-wrap" }, [
       el("div", { class: "welcome-hero" }, [el("span", { class: "brand-mark" })]),
@@ -1129,6 +1131,7 @@
   function enterView(view, presetId) {
     currentView = view;
     adminPanelOpen = false;
+    ajustePanelOpen = false;
     if (view === "dashboard") {
       var preset = DATE_PRESETS.filter(function (p) { return p.id === (presetId || "todo"); })[0] || DATE_PRESETS[0];
       currentPreset = preset.id;
@@ -1378,6 +1381,128 @@
     });
   }
 
+  function ensureAjusteButton() {
+    if (document.getElementById("ajuste-btn")) return;
+    var toolbar = document.querySelector(".toolbar");
+    if (!toolbar) return;
+    var btn = el("button", { class: "btn", id: "ajuste-btn", text: "Ajuste manual" });
+    btn.addEventListener("click", function () {
+      ajustePanelOpen = !ajustePanelOpen;
+      var existing = document.getElementById("ajuste-panel");
+      if (!ajustePanelOpen) {
+        if (existing) existing.remove();
+        return;
+      }
+      loadAjustePanel();
+    });
+    var logoutBtn = document.getElementById("logout-btn");
+    toolbar.insertBefore(btn, logoutBtn);
+  }
+
+  function loadAjustePanel() {
+    var existing = document.getElementById("ajuste-panel");
+    if (existing) existing.remove();
+    var panel = el("div", { class: "card", id: "ajuste-panel" }, [
+      el("div", { class: "section-title", text: "Ajuste manual" }),
+      el("div", { class: "section-desc", text: "Cargando…" }),
+    ]);
+    var header = document.querySelector("header");
+    header.insertAdjacentElement("afterend", panel);
+
+    fetch("/api/admin/agentes", { headers: { Authorization: "Bearer " + currentAccessToken } })
+      .then(function (res) {
+        return res.json().then(function (body) { return { status: res.status, body: body }; });
+      })
+      .then(function (r) {
+        if (r.status !== 200) throw new Error(r.body.error || "Error al cargar agentes");
+        renderAjustePanel(r.body.agentes);
+      })
+      .catch(function (err) {
+        panel.innerHTML = "";
+        panel.appendChild(el("div", { class: "section-title", text: "Ajuste manual" }));
+        panel.appendChild(el("div", { class: "section-desc", text: err.message }));
+      });
+  }
+
+  function renderAjustePanel(agentes) {
+    var panel = document.getElementById("ajuste-panel");
+    if (!panel) return;
+    panel.innerHTML = "";
+    panel.appendChild(el("div", { class: "section-title", text: "Ajuste manual" }));
+    panel.appendChild(el("div", {
+      class: "section-desc",
+      text: "Para cuando GHL falla y un lead, registro o FTD real no quedó sincronizado: lo agregás acá a mano.",
+    }));
+
+    var agenteSelect = el("select", { class: "range-input" });
+    agentes.forEach(function (a) {
+      agenteSelect.appendChild(el("option", { value: String(a.id), text: a.nombre }));
+    });
+
+    var tipoSelect = el("select", { class: "range-input" }, [
+      el("option", { value: "lead", text: "Lead" }),
+      el("option", { value: "registro", text: "Registro" }),
+      el("option", { value: "ftd", text: "FTD" }),
+    ]);
+
+    var cantidadInput = el("input", { type: "number", class: "range-input", value: "1", min: "1", max: "200" });
+    var fechaInput = el("input", { type: "date", class: "range-input" });
+    var msg = el("span", { class: "admin-msg" });
+    var btn = el("button", { class: "btn", text: "Agregar ajuste" });
+
+    btn.addEventListener("click", function () {
+      var cantidad = parseInt(cantidadInput.value, 10);
+      if (!agenteSelect.value) {
+        msg.textContent = "Elegí un agente";
+        return;
+      }
+      if (!cantidad || cantidad < 1) {
+        msg.textContent = "La cantidad tiene que ser al menos 1";
+        return;
+      }
+      btn.disabled = true;
+      btn.textContent = "Agregando…";
+      fetch("/api/admin/ajuste-manual", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + currentAccessToken },
+        body: JSON.stringify({
+          agenteId: Number(agenteSelect.value),
+          tipo: tipoSelect.value,
+          cantidad: cantidad,
+          fecha: fechaInput.value || undefined,
+        }),
+      })
+        .then(function (res) {
+          return res.json().then(function (body) { return { status: res.status, body: body }; });
+        })
+        .then(function (r) {
+          btn.disabled = false;
+          btn.textContent = "Agregar ajuste";
+          if (r.status !== 201) {
+            msg.textContent = r.body.error || "No se pudo agregar el ajuste";
+            return;
+          }
+          msg.textContent = "Listo: " + r.body.cantidad + " " + r.body.tipo + "(s) agregados a " + r.body.agente + ".";
+          loadMetrics(true, currentAccessToken);
+        })
+        .catch(function () {
+          btn.disabled = false;
+          btn.textContent = "Agregar ajuste";
+          msg.textContent = "Error de red, probá de nuevo.";
+        });
+    });
+
+    panel.appendChild(el("div", { class: "admin-row" }, [
+      agenteSelect,
+      tipoSelect,
+      cantidadInput,
+      fechaInput,
+      btn,
+      msg,
+    ]));
+    panel.appendChild(el("div", { class: "section-desc", text: "Si dejás la fecha vacía, se usa el momento actual." }));
+  }
+
   function renderContentState(node) {
     var content = document.getElementById("content");
     content.innerHTML = "";
@@ -1402,7 +1527,7 @@
   }
 
   function renderData(data) {
-    if (data.rol === "director") ensureAdminButton();
+    if (data.rol === "director") { ensureAdminButton(); ensureAjusteButton(); }
     var meta = Number(data.metaVentasUSD) || 2400;
     var agentes = (data.agentes || []).slice().sort(function (a, b) { return b.ventasUSD - a.ventasUSD; });
 
@@ -2283,6 +2408,7 @@
   function boot() {
     if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
     adminPanelOpen = false;
+    ajustePanelOpen = false;
     currentView = "welcome";
     supabaseClient.auth.getSession().then(function (result) {
       var session = result.data && result.data.session;
