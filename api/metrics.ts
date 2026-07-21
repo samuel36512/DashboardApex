@@ -176,6 +176,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!page || page.length < PAGE) break;
   }
 
+  // Leads de este mes por agente, para el "costo por lead" de toda la
+  // oficina (gasto real de pauta / total de leads del mes) - se usa como
+  // base para repartir el gasto real entre agentes segun sus FTD, en vez de
+  // solo la tarifa fija por tier.
+  const leadsMesPorAgente = new Map<string, number>();
+  let totalLeadsMes = 0;
+  for (let offset = 0; ; offset += PAGE) {
+    const { data: page, error } = await supabase
+      .from("eventos")
+      .select("agente")
+      .eq("tipo", "lead")
+      .gte("fecha", desdeMesCo)
+      .range(offset, offset + PAGE - 1);
+    if (error) {
+      return res.status(500).json({ error: "Error leyendo leads del mes" });
+    }
+    for (const row of page ?? []) {
+      leadsMesPorAgente.set(row.agente, (leadsMesPorAgente.get(row.agente) ?? 0) + 1);
+      totalLeadsMes++;
+    }
+    if (!page || page.length < PAGE) break;
+  }
+
   const pct = (num: number, den: number) => (den > 0 ? Math.round((num / den) * 10000) / 100 : 0);
 
   // Estimado de "mejores pagos": comision de ventas ya ganada + un bono
@@ -183,35 +206,51 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // que esto es una proyeccion, no una cifra contable exacta).
   const comisionPorFtd = Number(process.env.COMISION_POR_FTD_USD ?? 8);
 
-  const agentes = Array.from(byAgent.entries())
-    .map(([agente, a]) => {
-      const tier = AGENTE_TIER[agente];
-      const ftdsMes = ftdsMesPorAgente.get(agente) ?? 0;
-      const tasaDiaria = tasaDiariaCOP(agente);
-      const gastoPautaCOP = tasaDiaria !== null ? Math.round(tasaDiaria * diasActivosPauta) : null;
-      const costoPorFtdCOP = gastoPautaCOP !== null && ftdsMes > 0 ? Math.round(gastoPautaCOP / ftdsMes) : null;
-      const membresiasMes = membresiasMesPorAgente.get(agente) ?? 0;
-      return {
-        agente,
-        leads: a.leads,
-        registros: a.registros,
-        ftds: a.ftds,
-        ventasUSD: a.ventasUSD,
-        comisionUSD: a.comisionUSD,
-        tier: tier ?? null,
-        ftdsMes,
-        gastoPautaCOP,
-        costoPorFtdCOP,
-        membresiasMes,
-        gananciaEstimadaUSD: a.comisionUSD + a.ftds * comisionPorFtd,
-        conversionesRecientes: conversionesRecientes.get(agente) || [],
-        conversion: {
-          leadToRegistro: pct(a.registros, a.leads),
-          registroToFtd: pct(a.ftds, a.registros),
-          leadToFtd: pct(a.ftds, a.leads),
-        },
-      };
-    })
+  const agentesBase = Array.from(byAgent.entries()).map(([agente, a]) => {
+    const tier = AGENTE_TIER[agente];
+    const ftdsMes = ftdsMesPorAgente.get(agente) ?? 0;
+    const leadsMes = leadsMesPorAgente.get(agente) ?? 0;
+    const tasaDiaria = tasaDiariaCOP(agente);
+    const gastoPautaCOP = tasaDiaria !== null ? Math.round(tasaDiaria * diasActivosPauta) : null;
+    const costoPorFtdCOP = gastoPautaCOP !== null && ftdsMes > 0 ? Math.round(gastoPautaCOP / ftdsMes) : null;
+    const membresiasMes = membresiasMesPorAgente.get(agente) ?? 0;
+    return {
+      agente,
+      leads: a.leads,
+      registros: a.registros,
+      ftds: a.ftds,
+      ventasUSD: a.ventasUSD,
+      comisionUSD: a.comisionUSD,
+      tier: tier ?? null,
+      ftdsMes,
+      leadsMes,
+      gastoPautaCOP,
+      costoPorFtdCOP,
+      membresiasMes,
+      gananciaEstimadaUSD: a.comisionUSD + a.ftds * comisionPorFtd,
+      conversionesRecientes: conversionesRecientes.get(agente) || [],
+      conversion: {
+        leadToRegistro: pct(a.registros, a.leads),
+        registroToFtd: pct(a.ftds, a.registros),
+        leadToFtd: pct(a.ftds, a.leads),
+      },
+    };
+  });
+
+  // "Costo por lead" real de toda la oficina: la pauta diaria acumulada por
+  // tier (arriba) sigue exactamente igual, pero ademas se reparte el gasto
+  // REAL total entre todos los leads que entraron este mes, y ese costo por
+  // lead se multiplica por los FTD de cada agente - es el "costo por FTD
+  // real" que pidio el director, basado en el gasto real y no solo en la
+  // tarifa fija por tier.
+  const totalInvertidoCOP = agentesBase.reduce((acc, a) => acc + (a.gastoPautaCOP || 0), 0);
+  const costoPorLeadCOP = totalLeadsMes > 0 ? totalInvertidoCOP / totalLeadsMes : null;
+
+  const agentes = agentesBase
+    .map((a) => ({
+      ...a,
+      costoPorFtdRealCOP: costoPorLeadCOP !== null ? Math.round(costoPorLeadCOP * a.ftdsMes) : null,
+    }))
     .sort((a, b) => a.agente.localeCompare(b.agente));
 
   const rol = (perfil as any).rol as string;
@@ -227,6 +266,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     pautaActiva,
     diasActivosPauta: Math.round(diasActivosPauta * 100) / 100,
     diaDelMesPauta,
+    totalInvertidoPautaCOP: totalInvertidoCOP,
+    totalLeadsMes,
+    costoPorLeadCOP: costoPorLeadCOP !== null ? Math.round(costoPorLeadCOP) : null,
     actualizado: new Date().toISOString(),
     rol,
     filtro: { desde: desde || null, hasta: hasta || null },

@@ -1542,6 +1542,37 @@
       content.appendChild(el("section", {}, [promedioHero]));
     }
 
+    var costoLeadCOP = data.costoPorLeadCOP;
+    if (costoLeadCOP !== null && costoLeadCOP !== undefined) {
+      var ordenadosReal = agentes.slice().sort(function (a, b) {
+        var ca = a.costoPorFtdRealCOP === null ? Infinity : a.costoPorFtdRealCOP;
+        var cb = b.costoPorFtdRealCOP === null ? Infinity : b.costoPorFtdRealCOP;
+        return ca - cb;
+      });
+      var costoRealCard = el("div", { class: "card" });
+      costoRealCard.appendChild(el("div", { class: "section-title", text: "Costo por FTD real (según gasto y leads)" }));
+      costoRealCard.appendChild(el("div", {
+        class: "section-desc",
+        text: "Costo por lead de la oficina (" + currencyCOP.format(costoLeadCOP) + " = " + currencyCOP.format(data.totalInvertidoPautaCOP || 0) + " invertidos ÷ " + (data.totalLeadsMes || 0).toLocaleString("en-US") + " leads este mes) × FTD de cada agente este mes.",
+      }));
+      ordenadosReal.forEach(function (a, i) {
+        var esMejor = i === 0 && a.costoPorFtdRealCOP !== null;
+        costoRealCard.appendChild(el("div", { class: "cost-row" + (esMejor ? " best" : "") }, [
+          el("div", { class: "cost-rank", text: String(i + 1) }),
+          el("div", {}, [
+            el("div", { class: "cost-name", text: a.agente, title: a.agente }),
+            a.tier ? el("div", { class: "cost-tier " + a.tier, text: a.tier === "ejecutivo" ? "Ejecutivo" : "Junior" }) : null,
+          ]),
+          el("div", { class: "cost-detail" }, [
+            el("span", { text: a.ftdsMes + (a.ftdsMes === 1 ? " FTD" : " FTDs") + " este mes" }),
+            el("span", { text: (a.leadsMes || 0) + ((a.leadsMes || 0) === 1 ? " lead" : " leads") + " este mes" }),
+          ]),
+          el("div", { class: "cost-value", text: a.costoPorFtdRealCOP !== null ? currencyCOP.format(a.costoPorFtdRealCOP) : "Sin FTD" }),
+        ]));
+      });
+      content.appendChild(el("section", {}, [costoRealCard]));
+    }
+
     renderContentState(content);
 
     document.getElementById("updated-label").textContent =
