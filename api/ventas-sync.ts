@@ -174,6 +174,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (agentesError) throw new Error(`Error leyendo agentes: ${agentesError.message}`);
     const agentesActivos = (agentesRows ?? []).map((a) => a.nombre);
 
+    // Segunda barrera contra duplicados, independiente del ID calculado: se
+    // arma una firma de negocio (agente+producto+monto+fecha+correo) por
+    // cada venta YA guardada. Si el ID calculado para una fila cambia por
+    // cualquier motivo (que ya paso varias veces con datos raros de la
+    // hoja), la firma sigue siendo la misma y la fila se salta en vez de
+    // crear una copia nueva - no depende de adivinar por que el ID cambio.
+    const firmasExistentes = new Map<string, string>();
+    const PAGE_FIRMAS = 1000;
+    for (let offset = 0; ; offset += PAGE_FIRMAS) {
+      const { data: page, error } = await supabase
+        .from("eventos")
+        .select("contacto_id, agente, producto, monto, fecha, contacto_nombre")
+        .eq("tipo", "venta")
+        .range(offset, offset + PAGE_FIRMAS - 1);
+      if (error) throw new Error(`Error leyendo ventas existentes: ${error.message}`);
+      for (const row of page ?? []) {
+        const correo =
+          (row.contacto_nombre || "")
+            .split("\n")
+            .map((s: string) => s.trim())
+            .filter(Boolean)
+            .pop() || "";
+        const firma = `${row.agente}|${row.producto}|${row.monto}|${row.fecha}|${correo.toLowerCase()}`;
+        firmasExistentes.set(firma, row.contacto_id);
+      }
+      if (!page || page.length < PAGE_FIRMAS) break;
+    }
+    let duplicadosEvitados = 0;
+
     const mesParam = typeof req.query.mes === "string" ? req.query.mes.trim() : "";
     const ahora = new Date();
     const tabName = mesParam
@@ -252,19 +281,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         continue;
       }
 
+      const montoParsed = parsePrecio(precioCrudo);
+      const productoFinal = producto || "Sin especificar";
+      // El ID se arma SOLO con valores ya normalizados (nunca texto crudo de
+      // la hoja): fechaIso en vez de fechaCruda (algunas filas traen la hora
+      // pegada a la fecha y esa hora no es estable entre sincronizaciones), y
+      // el precio ya parseado a numero en vez del texto con formato de
+      // moneda. Texto crudo inestable = un ID nuevo en cada sincronizacion =
+      // la misma venta duplicada sin parar.
+      const contactoId = idVenta((fila[5] || "").toString().trim(), clienteId, fechaIso, producto, String(montoParsed));
+
+      const firma = `${agente}|${productoFinal}|${montoParsed}|${fechaIso}|${clienteId.toLowerCase()}`;
+      const idExistente = firmasExistentes.get(firma);
+      if (idExistente && idExistente !== contactoId) {
+        // Ya hay una venta identica guardada con OTRO id (el calculo del ID
+        // cambio) - no se crea una fila nueva, se deja la que ya esta.
+        duplicadosEvitados++;
+        continue;
+      }
+      firmasExistentes.set(firma, contactoId);
+
       rowsVenta.push({
-        // El ID se arma SOLO con valores ya normalizados (nunca texto crudo
-        // de la hoja): fechaIso en vez de fechaCruda (algunas filas traen la
-        // hora pegada a la fecha y esa hora no es estable entre
-        // sincronizaciones), y el precio ya parseado a numero en vez del
-        // texto con formato de moneda. Texto crudo inestable = un ID nuevo
-        // en cada sincronizacion = la misma venta duplicada sin parar.
-        contacto_id: idVenta((fila[5] || "").toString().trim(), clienteId, fechaIso, producto, String(parsePrecio(precioCrudo))),
+        contacto_id: contactoId,
         agente,
         tipo: "venta",
-        monto: parsePrecio(precioCrudo),
+        monto: montoParsed,
         comision: parsePrecio(comisionCruda),
-        producto: producto || "Sin especificar",
+        producto: productoFinal,
         contacto_nombre: cliente,
         fecha: fechaIso,
       });
@@ -286,6 +329,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       pestana: tabName,
       filasLeidas: filas.length - headerIdx - 2,
       ventasGuardadas: rowsVenta.length,
+      duplicadosEvitados,
       sinFecha,
       sinFechaDeMiEquipo: sinFechaConocidos,
       agentesNoReconocidos: Array.from(noReconocidos),
