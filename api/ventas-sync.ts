@@ -253,12 +253,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       rowsVenta.push({
-        // Se prefiere fechaCruda (igual que siempre - no rompe los IDs ya
-        // guardados de ventas anteriores) y SOLO cuando viene vacia (celda
-        // combinada) se usa fechaIso como respaldo, para que esa fila puntual
-        // tenga un ID estable en vez de cambiar segun si Sheets devuelve la
-        // celda vacia o llena en cada sincronizacion.
-        contacto_id: idVenta((fila[5] || "").toString().trim(), clienteId, fechaCruda || fechaIso, producto, precioCrudo),
+        // El ID se arma SOLO con valores ya normalizados (nunca texto crudo
+        // de la hoja): fechaIso en vez de fechaCruda (algunas filas traen la
+        // hora pegada a la fecha y esa hora no es estable entre
+        // sincronizaciones), y el precio ya parseado a numero en vez del
+        // texto con formato de moneda. Texto crudo inestable = un ID nuevo
+        // en cada sincronizacion = la misma venta duplicada sin parar.
+        contacto_id: idVenta((fila[5] || "").toString().trim(), clienteId, fechaIso, producto, String(parsePrecio(precioCrudo))),
         agente,
         tipo: "venta",
         monto: parsePrecio(precioCrudo),
