@@ -1470,76 +1470,26 @@
     tableCard.appendChild(table);
     content.appendChild(el("section", {}, [tableCard]));
 
-    var conCosto = agentes.filter(function (a) { return a.tier; });
-    if (conCosto.length > 0) {
-      var ordenadosCosto = conCosto.slice().sort(function (a, b) {
-        var ca = a.costoPorFtdCOP === null ? Infinity : a.costoPorFtdCOP;
-        var cb = b.costoPorFtdCOP === null ? Infinity : b.costoPorFtdCOP;
-        return ca - cb;
-      });
-      var costoCard = el("div", { class: "card" });
-      costoCard.appendChild(el("div", { class: "section-title", text: "Costo por FTD" }));
-      costoCard.appendChild(el("div", {
-        class: "section-desc",
-        text: "Pauta invertida este mes ÷ FTD convertidos este mes. De mejor (más barato) a peor.",
-      }));
-      ordenadosCosto.forEach(function (a, i) {
-        var esMejor = i === 0 && a.costoPorFtdCOP !== null;
-        costoCard.appendChild(el("div", { class: "cost-row" + (esMejor ? " best" : "") }, [
-          el("div", { class: "cost-rank", text: String(i + 1) }),
-          el("div", {}, [
-            el("div", { class: "cost-name", text: a.agente, title: a.agente }),
-            el("div", { class: "cost-tier " + a.tier, text: a.tier === "ejecutivo" ? "Ejecutivo" : "Junior" }),
-          ]),
-          el("div", { class: "cost-detail" }, [
-            el("span", { text: a.ftdsMes + (a.ftdsMes === 1 ? " FTD" : " FTDs") + " este mes" }),
-            el("span", { text: currencyCOP.format(a.gastoPautaCOP || 0) + " invertidos" }),
-          ]),
-          el("div", { class: "cost-value", text: a.costoPorFtdCOP !== null ? currencyCOP.format(a.costoPorFtdCOP) : "Sin FTD" }),
-        ]));
-      });
-      content.appendChild(el("section", {}, [costoCard]));
-
-      if (data.rol === "director") {
-        var pautaActiva = data.pautaActiva !== false;
-        var diasActivosTxt = (Number(data.diasActivosPauta) || 0).toLocaleString("es-CO", { maximumFractionDigits: 2 });
-        var diaDelMesTxt = data.diaDelMesPauta != null ? data.diaDelMesPauta : "?";
-        var pautaCard = el("div", { class: "card pauta-card" }, [
-          el("div", { class: "pauta-info", text: "Días de pauta activa este mes: " + diasActivosTxt + " de " + diaDelMesTxt + " transcurridos." }),
-        ]);
-        var pautaBtn = el("button", {
-          class: "pauta-toggle-btn" + (pautaActiva ? "" : " off"),
-          text: pautaActiva ? "PAUTA DESACTIVADA" : "PAUTA ACTIVADA",
-        });
-        pautaBtn.addEventListener("click", function () {
-          pautaBtn.disabled = true;
-          fetch("/pauta-estado", { method: "POST", headers: { Authorization: "Bearer " + currentAccessToken } })
-            .then(function (r) { return r.json(); })
-            .then(function () { loadMetrics(true, currentAccessToken); })
-            .catch(function () { pautaBtn.disabled = false; });
-        });
-        pautaCard.appendChild(pautaBtn);
-        content.appendChild(el("section", {}, [pautaCard]));
-      }
-
-      var totalInvertidoCOP = conCosto.reduce(function (acc, a) { return acc + (a.gastoPautaCOP || 0); }, 0);
-      var totalFtdsMesCosto = conCosto.reduce(function (acc, a) { return acc + (a.ftdsMes || 0); }, 0);
-      var costoPromedioCOP = totalFtdsMesCosto > 0 ? Math.round(totalInvertidoCOP / totalFtdsMesCosto) : null;
-      var promedioHero = el("div", { class: "card director-hero" }, [
-        el("div", { class: "dh-label", text: "Costo promedio de la oficina este mes" }),
-        el("div", { class: "dh-total", text: costoPromedioCOP !== null ? currencyCOP.format(costoPromedioCOP) + " / FTD" : "Sin FTD todavía" }),
+    if (data.rol === "director") {
+      var pautaActiva = data.pautaActiva !== false;
+      var diasActivosTxt = (Number(data.diasActivosPauta) || 0).toLocaleString("es-CO", { maximumFractionDigits: 2 });
+      var diaDelMesTxt = data.diaDelMesPauta != null ? data.diaDelMesPauta : "?";
+      var pautaCard = el("div", { class: "card pauta-card" }, [
+        el("div", { class: "pauta-info", text: "Días de pauta activa este mes: " + diasActivosTxt + " de " + diaDelMesTxt + " transcurridos." }),
       ]);
-      promedioHero.appendChild(el("div", { class: "dh-stats" }, [
-        el("div", { class: "dh-stat" }, [
-          el("span", { class: "dh-stat-label", text: "Total invertido" }),
-          el("span", { class: "dh-stat-value", text: currencyCOP.format(totalInvertidoCOP) }),
-        ]),
-        el("div", { class: "dh-stat" }, [
-          el("span", { class: "dh-stat-label", text: "FTD del equipo categorizado" }),
-          el("span", { class: "dh-stat-value", text: totalFtdsMesCosto.toLocaleString("en-US") }),
-        ]),
-      ]));
-      content.appendChild(el("section", {}, [promedioHero]));
+      var pautaBtn = el("button", {
+        class: "pauta-toggle-btn" + (pautaActiva ? "" : " off"),
+        text: pautaActiva ? "PAUTA DESACTIVADA" : "PAUTA ACTIVADA",
+      });
+      pautaBtn.addEventListener("click", function () {
+        pautaBtn.disabled = true;
+        fetch("/pauta-estado", { method: "POST", headers: { Authorization: "Bearer " + currentAccessToken } })
+          .then(function (r) { return r.json(); })
+          .then(function () { loadMetrics(true, currentAccessToken); })
+          .catch(function () { pautaBtn.disabled = false; });
+      });
+      pautaCard.appendChild(pautaBtn);
+      content.appendChild(el("section", {}, [pautaCard]));
     }
 
     var costoLeadCOP = data.costoPorLeadCOP;
