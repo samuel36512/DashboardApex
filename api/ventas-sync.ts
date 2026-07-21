@@ -58,15 +58,34 @@ function coincidePorPalabras(sheetNombreNorm: string, agenteNombre: string): boo
 }
 
 function mapearAgente(sheetNombre: string, agentesActivos: string[]): string | null {
+  // Algunas filas traen el nombre y el correo pegados en la misma celda,
+  // separados por un salto de linea (ej. "Gab Mont\nGabrielmonteverde75@gmail.com")
+  // - se intenta cada linea por separado (ademas del valor completo), para
+  // no perder la venta cuando el nombre viene mal escrito pero el correo si
+  // coincide con uno conocido.
+  const candidatos = sheetNombre
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const completo = sheetNombre.trim();
+  if (completo && !candidatos.includes(completo)) candidatos.push(completo);
+  if (candidatos.length === 0) return null;
+
   // A veces la columna AGENTE trae el correo del agente en vez del nombre -
   // se compara primero (exacto, sin acentos ni mayusculas de por medio).
-  const email = sheetNombre.trim().toLowerCase();
-  if (EMAIL_TO_AGENTE[email]) return EMAIL_TO_AGENTE[email];
-
-  const norm = normalizar(sheetNombre);
-  if (AGENTE_ALIASES[norm]) return AGENTE_ALIASES[norm];
-  for (const nombre of agentesActivos) {
-    if (coincidePorPalabras(norm, nombre)) return nombre;
+  for (const candidato of candidatos) {
+    const email = candidato.toLowerCase();
+    if (EMAIL_TO_AGENTE[email]) return EMAIL_TO_AGENTE[email];
+  }
+  for (const candidato of candidatos) {
+    const norm = normalizar(candidato);
+    if (AGENTE_ALIASES[norm]) return AGENTE_ALIASES[norm];
+  }
+  for (const candidato of candidatos) {
+    const norm = normalizar(candidato);
+    for (const nombre of agentesActivos) {
+      if (coincidePorPalabras(norm, nombre)) return nombre;
+    }
   }
   return null;
 }
