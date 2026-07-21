@@ -11,6 +11,8 @@
   "functions": {
     "api/ghl-sync.ts": { "maxDuration": 55 },
     "api/ghl-debug.ts": { "maxDuration": 45 },
-    "api/ventas-sync.ts": { "maxDuration": 55 }
+    "api/ventas-sync.ts": { "maxDuration": 55 },
+    "api/pago-director.ts": { "maxDuration": 30 },
+    "api/metrics.ts": { "maxDuration": 30 }
   }
 }
