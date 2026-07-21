@@ -247,12 +247,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       rowsVenta.push({
-        // Se usa fechaIso (ya resuelta) y no fechaCruda: la celda de fecha
-        // viene vacia en filas con celdas combinadas y se arrastra la ultima
-        // fecha valida - si en una sincronizacion Sheets la devuelve vacia y
-        // en otra la devuelve explicita, usar fechaCruda generaba un ID
-        // distinto para la MISMA venta y la duplicaba.
-        contacto_id: idVenta((fila[5] || "").toString().trim(), cliente, fechaIso, producto, precioCrudo),
+        // Se prefiere fechaCruda (igual que siempre - no rompe los IDs ya
+        // guardados de ventas anteriores) y SOLO cuando viene vacia (celda
+        // combinada) se usa fechaIso como respaldo, para que esa fila puntual
+        // tenga un ID estable en vez de cambiar segun si Sheets devuelve la
+        // celda vacia o llena en cada sincronizacion.
+        contacto_id: idVenta((fila[5] || "").toString().trim(), cliente, fechaCruda || fechaIso, producto, precioCrudo),
         agente,
         tipo: "venta",
         monto: parsePrecio(precioCrudo),
