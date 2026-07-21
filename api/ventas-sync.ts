@@ -150,6 +150,9 @@ async function getAccessToken(credsJson: string): Promise<string> {
   return data.access_token;
 }
 
+const LOCK_KEY = "ventas_sync_lock";
+const LOCK_VIGENCIA_MS = 4 * 60 * 1000;
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const secret = process.env.WEBHOOK_SECRET;
   if (!secret || req.query.key !== secret) {
@@ -163,6 +166,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const supabase = getSupabase();
+
+  // Si el cron (u otro disparador) reintenta por timeout mientras la
+  // sincronizacion anterior todavia esta corriendo, dos ejecuciones casi
+  // simultaneas pueden leer la base ANTES de que ninguna haya guardado nada
+  // todavia, y las dos terminan insertando todo - duplicando el mes entero
+  // de una sola vez. Se usa sync_state como traba: si hay un candado
+  // reciente, se corta de una en vez de arrancar una segunda pasada.
+  const { data: candadoRow } = await supabase.from("sync_state").select("value").eq("key", LOCK_KEY).maybeSingle();
+  const candadoDesde = candadoRow?.value ? new Date(candadoRow.value as string).getTime() : 0;
+  if (candadoDesde && Date.now() - candadoDesde < LOCK_VIGENCIA_MS) {
+    return res.status(409).json({ error: "Ya hay una sincronizacion de ventas en curso, esperá un momento y volvé a intentar." });
+  }
+  await supabase.from("sync_state").upsert({ key: LOCK_KEY, value: new Date().toISOString() });
 
   try {
     const token = await getAccessToken(credsJson);
@@ -349,5 +365,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   } catch (err: any) {
     return res.status(502).json({ error: err?.message || "Error sincronizando ventas" });
+  } finally {
+    await supabase.from("sync_state").delete().eq("key", LOCK_KEY);
   }
 }
