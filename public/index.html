@@ -1665,6 +1665,20 @@
         ]));
       });
       content.appendChild(el("section", {}, [costoRealCard]));
+
+      var totalFtdsMes = agentes.reduce(function (acc, a) { return acc + (a.ftdsMes || 0); }, 0);
+      var totalInvertidoCOP = Number(data.totalInvertidoPautaCOP) || 0;
+      if (totalFtdsMes > 0) {
+        var costoPromedioFtdCOP = totalInvertidoCOP / totalFtdsMes;
+        var promedioGrid = el("div", { class: "spotlight-grid" }, [
+          el("div", { class: "spotlight-card star" }, [
+            el("div", { class: "spotlight-kicker", text: "🎯 Costo promedio por FTD" }),
+            el("div", { class: "spotlight-name", text: currencyCOP.format(costoPromedioFtdCOP) + " / FTD" }),
+            el("div", { class: "spotlight-value", text: currencyCOP.format(totalInvertidoCOP) + " invertidos ÷ " + totalFtdsMes + (totalFtdsMes === 1 ? " FTD" : " FTDs") + " este mes" }),
+          ]),
+        ]);
+        content.appendChild(el("section", {}, [promedioGrid]));
+      }
     }
 
     renderContentState(content);
