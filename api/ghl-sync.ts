@@ -8,6 +8,7 @@ const TIME_BUDGET_MS = 28000;
 const REQUEST_TIMEOUT_MS = 20000;
 const CURSOR_KEY = "ghl_sync_cursor";
 const CUTOFF_KEY = "registro_ftd_cutoff";
+const LEADS_CUTOFF_KEY = "leads_cutoff";
 const PAGE_LIMIT = 100;
 const MAX_RETRIES_429 = 4;
 
@@ -230,7 +231,8 @@ async function syncAgente(
   supabase: Supabase,
   started: number,
   cursor: SearchCursor | undefined,
-  empresaId: number
+  empresaId: number,
+  leadsCutoffMs: number | null
 ) {
   let searchAfter = cursor?.searchAfter;
   let contactosRevisados = 0;
@@ -258,15 +260,30 @@ async function syncAgente(
     }
 
     const rows: EventoRow[] = [];
+    // Si esta empresa tiene un corte de leads (leadsCutoffMs != null), lo
+    // de antes de ese instante se maneja a mano (director ya lo compenso
+    // por su cuenta) - como GHL devuelve los contactos ordenados por
+    // dateAdded descendente, en cuanto aparece uno mas viejo que el corte
+    // el resto de esta pagina y todas las siguientes tambien lo son, asi
+    // que se puede cortar ahi mismo sin re-escanear todo el historico cada
+    // corrida.
+    let alcanzoCorte = false;
     for (const c of contacts) {
       contactosRevisados++;
       const fecha = c.dateAdded || c.dateUpdated || new Date().toISOString();
+      if (leadsCutoffMs !== null && new Date(fecha).getTime() < leadsCutoffMs) {
+        alcanzoCorte = true;
+        break;
+      }
       rows.push({ contacto_id: c.id, agente: agenteNombre, tipo: "lead", fecha, empresa_id: empresaId });
     }
     if (rows.length > 0) {
       const { error } = await supabase.from("eventos").upsert(rows, { onConflict: "empresa_id,contacto_id,tipo" });
       if (error) throw new Error(`Error guardando datos (${agenteNombre}): ${error.message}`);
       eventosGuardados += rows.length;
+    }
+    if (alcanzoCorte) {
+      return { done: true, cursor: undefined, contactosRevisados, eventosGuardados };
     }
 
     searchAfter = contacts[contacts.length - 1].searchAfter;
@@ -328,6 +345,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .eq("key", CUTOFF_KEY)
     .maybeSingle();
   const cutoffMs = cutoffRow?.value ? new Date(cutoffRow.value as string).getTime() : Date.now();
+
+  // Corte de leads: opcional, distinto del de registro/ftd. Nulo (el
+  // default para toda empresa que no lo haya fijado) = comportamiento de
+  // siempre, trae todo el historico y lo va resumiendo entre corridas. Si
+  // esta fijado, todo lo de antes de ese instante se asume manejado a mano
+  // por el director y no se vuelve a traer.
+  const { data: leadsCutoffRow } = await supabase
+    .from("sync_state")
+    .select("value")
+    .eq("empresa_id", empresaId)
+    .eq("key", LEADS_CUTOFF_KEY)
+    .maybeSingle();
+  const leadsCutoffMs = leadsCutoffRow?.value ? new Date(leadsCutoffRow.value as string).getTime() : null;
 
   const headers = {
     Authorization: `Bearer ${token}`,
@@ -404,7 +434,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         supabase,
         started,
         agentCursor,
-        empresaId
+        empresaId,
+        leadsCutoffMs
       );
       contactosRevisados += result.contactosRevisados;
       eventosGuardados += result.eventosGuardados;
