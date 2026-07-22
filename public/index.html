@@ -2100,6 +2100,15 @@
       return;
     }
 
+    var totalVentasEquipo = agentes.reduce(function (acc, a) { return acc + (a.ventasUSD || 0); }, 0);
+    content.appendChild(el("div", { class: "hero-stat-grid" }, [
+      el("div", { class: "hero-stat" }, [
+        el("div", { class: "hero-stat-kicker", text: "Total ventas del equipo" }),
+        el("div", { class: "hero-stat-value", text: currency.format(totalVentasEquipo) }),
+        el("div", { class: "hero-stat-caption", text: agentes.length + (agentes.length === 1 ? " agente" : " agentes") + " con ventas" }),
+      ]),
+    ]));
+
     content.appendChild(el("section", {}, [buildVentasChart(agentes, meta)]));
 
     var teamCard = el("div", { class: "card" });
