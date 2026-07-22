@@ -4,8 +4,8 @@ import { resolveEmpresaFromSecret } from "./_lib/tenant";
 
 const GHL_BASE = "https://services.leadconnectorhq.com";
 const GHL_VERSION = "2021-07-28";
-const TIME_BUDGET_MS = 32000;
-const REQUEST_TIMEOUT_MS = 12000;
+const TIME_BUDGET_MS = 28000;
+const REQUEST_TIMEOUT_MS = 20000;
 const CURSOR_KEY = "ghl_sync_cursor";
 const CUTOFF_KEY = "registro_ftd_cutoff";
 const PAGE_LIMIT = 100;
@@ -16,20 +16,24 @@ function sleep(ms: number): Promise<void> {
 }
 
 async function fetchWithTimeout(url: string, options: RequestInit): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  try {
-    for (let intento = 0; intento <= MAX_RETRIES_429; intento++) {
+  for (let intento = 0; intento <= MAX_RETRIES_429; intento++) {
+    // Un AbortController/timer nuevo por intento - reusar uno solo entre
+    // reintentos (como estaba antes) hace que cada reintento arranque con
+    // MENOS de los REQUEST_TIMEOUT_MS completos, ya que el cronometro
+    // seguia corriendo desde el primer intento.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
       const res = await fetch(url, { ...options, signal: controller.signal });
       if (res.status !== 429 || intento === MAX_RETRIES_429) return res;
       const retryAfter = Number(res.headers.get("retry-after"));
       const espera = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 1000 * 2 ** intento;
       await sleep(espera);
+    } finally {
+      clearTimeout(timer);
     }
-    throw new Error("unreachable");
-  } finally {
-    clearTimeout(timer);
   }
+  throw new Error("unreachable");
 }
 
 interface EventoRow {
