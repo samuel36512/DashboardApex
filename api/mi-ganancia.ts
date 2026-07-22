@@ -1,41 +1,19 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getSupabase } from "./_lib/supabase";
-import { EMPRESA_ID_ACTUAL } from "./_lib/empresaActual";
-
-// Mismo estimado por FTD que se usa en "Ranking mejores pagos" para que
-// los dos numeros del agente coincidan.
-const COMISION_POR_FTD = Number(process.env.COMISION_POR_FTD_USD ?? 8);
+import { getAccessToken, requireAuth } from "./_lib/auth";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const authHeader = req.headers.authorization ?? "";
-  const accessToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-  if (!accessToken) {
-    return res.status(401).json({ error: "No autorizado" });
-  }
-
   const supabase = getSupabase();
-
-  const { data: userData, error: userError } = await supabase.auth.getUser(accessToken);
-  if (userError || !userData?.user) {
-    return res.status(401).json({ error: "Sesion invalida o vencida" });
+  const auth = await requireAuth(supabase, getAccessToken(req));
+  if (!auth.ok) {
+    return res.status(auth.status).json({ error: auth.error });
   }
-
-  const { data: perfil, error: perfilError } = await supabase
-    .from("perfiles")
-    .select("rol, agentes(nombre)")
-    .eq("id", userData.user.id)
-    .maybeSingle();
-  if (perfilError || !perfil) {
-    return res.status(403).json({ error: "Tu cuenta no tiene un perfil asignado" });
-  }
-
-  const rol = (perfil as any).rol as string;
-  const agenteRel = (perfil as any).agentes;
-  const miNombre: string | undefined = Array.isArray(agenteRel) ? agenteRel[0]?.nombre : agenteRel?.nombre;
+  const { empresaId, rol, agenteNombre: miNombre } = auth.ctx;
+  const COMISION_POR_FTD = auth.ctx.empresa.comisionPorFtdUSD;
   if (!miNombre) {
     return res.status(403).json({ error: "Tu cuenta no tiene un agente asociado" });
   }
@@ -60,7 +38,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .from("eventos")
       .select("tipo, monto, comision, producto")
       .eq("agente", miNombre)
-      .eq("empresa_id", EMPRESA_ID_ACTUAL)
+      .eq("empresa_id", empresaId)
       .in("tipo", ["ftd", "venta"])
       .range(offset, offset + PAGE - 1);
     if (desde) query = query.gte("fecha", desde);

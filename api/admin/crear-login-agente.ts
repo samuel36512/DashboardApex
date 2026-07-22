@@ -2,7 +2,6 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import crypto from "node:crypto";
 import { getSupabase } from "../_lib/supabase";
 import { getAccessToken, requireDirector } from "../_lib/auth";
-import { EMPRESA_ID_ACTUAL } from "../_lib/empresaActual";
 
 function randomPassword(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
@@ -22,6 +21,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!auth.ok) {
     return res.status(auth.status).json({ error: auth.error });
   }
+  const { empresaId } = auth.ctx;
 
   const body = (req.body ?? {}) as Record<string, unknown>;
   const agenteId = Number(body.agenteId);
@@ -34,7 +34,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .from("agentes")
     .select("id, nombre")
     .eq("id", agenteId)
-    .eq("empresa_id", EMPRESA_ID_ACTUAL)
+    .eq("empresa_id", empresaId)
     .maybeSingle();
   if (agenteError || !agente) {
     return res.status(400).json({ error: "Agente no encontrado" });
@@ -64,7 +64,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     rol: "agente",
     agente_id: agente.id,
     email,
-    empresa_id: EMPRESA_ID_ACTUAL,
+    empresa_id: empresaId,
   });
   if (perfilError) {
     return res.status(500).json({

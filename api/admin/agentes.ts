@@ -1,7 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getSupabase } from "../_lib/supabase";
 import { getAccessToken, requireDirector } from "../_lib/auth";
-import { EMPRESA_ID_ACTUAL } from "../_lib/empresaActual";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "GET") {
@@ -13,12 +12,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!auth.ok) {
     return res.status(auth.status).json({ error: auth.error });
   }
+  const { empresaId } = auth.ctx;
 
   const { data: agentesRows, error: agentesError } = await supabase
     .from("agentes")
     .select("id, nombre")
     .eq("activo", true)
-    .eq("empresa_id", EMPRESA_ID_ACTUAL)
+    .eq("empresa_id", empresaId)
     .order("nombre");
   if (agentesError) {
     return res.status(500).json({ error: "No se pudo leer agentes" });
@@ -28,7 +28,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .from("perfiles")
     .select("agente_id, email")
     .eq("rol", "agente")
-    .eq("empresa_id", EMPRESA_ID_ACTUAL);
+    .eq("empresa_id", empresaId);
   if (perfilesError) {
     return res.status(500).json({ error: "No se pudo leer perfiles" });
   }

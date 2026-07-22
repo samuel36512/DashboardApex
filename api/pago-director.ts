@@ -2,47 +2,27 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getSupabase } from "./_lib/supabase";
 import { tasaDiariaCOP } from "./_lib/agentTier";
 import { getDiasActivosPautaMes } from "./_lib/pautaEstado";
-import { EMPRESA_ID_ACTUAL } from "./_lib/empresaActual";
-
-// Tasa por FTD del equipo que gana el director, y el umbral (FTD del mes)
-// a partir del cual sube de $3 a $4 por FTD. Configurables por si cambian.
-const TASA_BASE = Number(process.env.COMISION_DIRECTOR_BASE_USD ?? 3);
-const TASA_ALTA = Number(process.env.COMISION_DIRECTOR_ALTA_USD ?? 4);
-const UMBRAL_FTD = Number(process.env.UMBRAL_FTD_TASA_ALTA ?? 1000);
-// El director gana este porcentaje de TODA la facturacion del equipo
-// (suma de ventas de todos los agentes), sin importar quien la cerro.
-const TASA_COMISION_VENTAS = Number(process.env.TASA_COMISION_DIRECTOR_VENTAS ?? 0.15);
+import { getAccessToken, requireAuth } from "./_lib/auth";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const authHeader = req.headers.authorization ?? "";
-  const accessToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-  if (!accessToken) {
-    return res.status(401).json({ error: "No autorizado" });
-  }
-
   const supabase = getSupabase();
-
-  const { data: userData, error: userError } = await supabase.auth.getUser(accessToken);
-  if (userError || !userData?.user) {
-    return res.status(401).json({ error: "Sesion invalida o vencida" });
+  const auth = await requireAuth(supabase, getAccessToken(req), { role: "director" });
+  if (!auth.ok) {
+    return res.status(auth.status).json({ error: auth.error });
   }
-
-  const { data: perfil, error: perfilError } = await supabase
-    .from("perfiles")
-    .select("rol")
-    .eq("id", userData.user.id)
-    .maybeSingle();
-  if (perfilError || !perfil) {
-    return res.status(403).json({ error: "Tu cuenta no tiene un perfil asignado" });
-  }
-  const rol = (perfil as any).rol as string;
-  if (rol !== "director") {
-    return res.status(403).json({ error: "Esta informacion es solo para el director" });
-  }
+  const { empresaId, rol } = auth.ctx;
+  // Tasa por FTD del equipo que gana el director, y el umbral (FTD del mes)
+  // a partir del cual sube de $3 a $4 por FTD - configurables por empresa.
+  const TASA_BASE = auth.ctx.empresa.comisionDirectorBaseUSD;
+  const TASA_ALTA = auth.ctx.empresa.comisionDirectorAltaUSD;
+  const UMBRAL_FTD = auth.ctx.empresa.umbralFtdTasaAlta;
+  // El director gana este porcentaje de TODA la facturacion del equipo
+  // (suma de ventas de todos los agentes), sin importar quien la cerro.
+  const TASA_COMISION_VENTAS = auth.ctx.empresa.tasaComisionDirectorVentas;
 
   const desde = typeof req.query.desde === "string" ? req.query.desde : "";
   const hasta = typeof req.query.hasta === "string" ? req.query.hasta : "";
@@ -54,7 +34,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .from("agentes")
     .select("nombre")
     .eq("activo", true)
-    .eq("empresa_id", EMPRESA_ID_ACTUAL);
+    .eq("empresa_id", empresaId);
   if (agentesError) {
     return res.status(500).json({ error: "Error leyendo agentes" });
   }
@@ -73,7 +53,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .from("eventos")
       .select("agente, tipo, monto, producto")
       .in("tipo", ["ftd", "venta", "lead"])
-      .eq("empresa_id", EMPRESA_ID_ACTUAL)
+      .eq("empresa_id", empresaId)
       .range(offset, offset + PAGE - 1);
     if (desde) query = query.gte("fecha", desde);
     if (hasta) query = query.lte("fecha", hasta.includes("T") ? hasta : `${hasta}T23:59:59.999Z`);
@@ -121,7 +101,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // propios de cada agente da su gasto real - dividido entre sus FTD, el
   // costo por FTD real. Como desde/hasta ya vienen fijados al mes en curso
   // para esta vista, a.ftds/a.leads ya son los conteos reales del mes.
-  const { diasActivos: diasActivosPauta } = await getDiasActivosPautaMes(supabase);
+  const { diasActivos: diasActivosPauta } = await getDiasActivosPautaMes(supabase, empresaId);
   const agentesBase = Array.from(byAgent.entries()).map(([agente, a]) => {
     const tasaDiaria = tasaDiariaCOP(agente);
     const gastoPautaCOP = tasaDiaria !== null ? Math.round(tasaDiaria * diasActivosPauta) : null;

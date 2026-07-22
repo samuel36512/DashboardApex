@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getSupabase } from "./_lib/supabase";
 import { AGENTE_TIER, tasaDiariaCOP } from "./_lib/agentTier";
 import { getDiasActivosPautaMes } from "./_lib/pautaEstado";
-import { EMPRESA_ID_ACTUAL } from "./_lib/empresaActual";
+import { getAccessToken, requireAuth } from "./_lib/auth";
 
 interface AgentAgg {
   leads: number;
@@ -17,27 +17,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const authHeader = req.headers.authorization ?? "";
-  const accessToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-  if (!accessToken) {
-    return res.status(401).json({ error: "No autorizado" });
-  }
-
   const supabase = getSupabase();
-
-  const { data: userData, error: userError } = await supabase.auth.getUser(accessToken);
-  if (userError || !userData?.user) {
-    return res.status(401).json({ error: "Sesion invalida o vencida" });
+  const auth = await requireAuth(supabase, getAccessToken(req));
+  if (!auth.ok) {
+    return res.status(auth.status).json({ error: auth.error });
   }
-
-  const { data: perfil, error: perfilError } = await supabase
-    .from("perfiles")
-    .select("rol, agentes(nombre)")
-    .eq("id", userData.user.id)
-    .maybeSingle();
-  if (perfilError || !perfil) {
-    return res.status(403).json({ error: "Tu cuenta no tiene un perfil asignado" });
-  }
+  const { empresaId } = auth.ctx;
 
   const desde = typeof req.query.desde === "string" ? req.query.desde : "";
   const hasta = typeof req.query.hasta === "string" ? req.query.hasta : "";
@@ -52,7 +37,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .from("agentes")
     .select("nombre")
     .eq("activo", true)
-    .eq("empresa_id", EMPRESA_ID_ACTUAL);
+    .eq("empresa_id", empresaId);
   if (agentesError) {
     return res.status(500).json({ error: "Error leyendo agentes" });
   }
@@ -70,7 +55,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let query = supabase
       .from("eventos")
       .select("agente, tipo, monto, comision")
-      .eq("empresa_id", EMPRESA_ID_ACTUAL)
+      .eq("empresa_id", empresaId)
       .range(offset, offset + PAGE - 1);
     // desde/hasta vienen del front como instante UTC completo (ya resuelto
     // desde el dia calendario LOCAL del director, no UTC) - si llegan como
@@ -115,7 +100,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { data: page, error } = await supabase
       .from("eventos")
       .select("agente, fecha, tipo")
-      .eq("empresa_id", EMPRESA_ID_ACTUAL)
+      .eq("empresa_id", empresaId)
       .in("tipo", ["registro", "ftd"])
       .not("contacto_id", "like", "baseline-%")
       .gte("fecha", unMesAtras)
@@ -136,7 +121,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // rango personalizado. FTD incluye el historico sembrado a mano (ya
   // viene atribuido a un agente puntual), es el total real del mes.
   const ahoraCo = new Date(Date.now() - 5 * 60 * 60 * 1000);
-  const { diasActivos: diasActivosPauta, diaDelMes: diaDelMesPauta, activa: pautaActiva } = await getDiasActivosPautaMes(supabase);
+  const { diasActivos: diasActivosPauta, diaDelMes: diaDelMesPauta, activa: pautaActiva } = await getDiasActivosPautaMes(supabase, empresaId);
   const desdeMesCo = new Date(
     Date.UTC(ahoraCo.getUTCFullYear(), ahoraCo.getUTCMonth(), 1, 5, 0, 0)
   ).toISOString();
@@ -146,7 +131,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .from("eventos")
       .select("agente")
       .eq("tipo", "ftd")
-      .eq("empresa_id", EMPRESA_ID_ACTUAL)
+      .eq("empresa_id", empresaId)
       .gte("fecha", desdeMesCo)
       .range(offset, offset + PAGE - 1);
     if (error) {
@@ -170,7 +155,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .from("eventos")
       .select("agente, producto")
       .eq("tipo", "venta")
-      .eq("empresa_id", EMPRESA_ID_ACTUAL)
+      .eq("empresa_id", empresaId)
       .gte("fecha", desdeMesCo)
       .range(offset, offset + PAGE - 1);
     if (error) {
@@ -196,7 +181,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .from("eventos")
       .select("agente")
       .eq("tipo", "lead")
-      .eq("empresa_id", EMPRESA_ID_ACTUAL)
+      .eq("empresa_id", empresaId)
       .gte("fecha", desdeMesCo)
       .range(offset, offset + PAGE - 1);
     if (error) {
@@ -214,7 +199,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Estimado de "mejores pagos": comision de ventas ya ganada + un bono
   // aproximado por cada FTD (el valor real de venta varia por producto, asi
   // que esto es una proyeccion, no una cifra contable exacta).
-  const comisionPorFtd = Number(process.env.COMISION_POR_FTD_USD ?? 8);
+  const comisionPorFtd = auth.ctx.empresa.comisionPorFtdUSD;
 
   const agentesBase = Array.from(byAgent.entries()).map(([agente, a]) => {
     const tier = AGENTE_TIER[agente];
@@ -265,16 +250,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     })
     .sort((a, b) => a.agente.localeCompare(b.agente));
 
-  const rol = (perfil as any).rol as string;
-  const agenteRel = (perfil as any).agentes;
-  const miNombre: string | undefined = Array.isArray(agenteRel) ? agenteRel[0]?.nombre : agenteRel?.nombre;
+  const { rol, agenteNombre: miNombre } = auth.ctx;
 
   const agentesFiltrados = rol === "agente" ? agentes.filter((a) => a.agente === miNombre) : agentes;
 
   res.setHeader("Cache-Control", "no-store");
   return res.status(200).json({
     agentes: agentesFiltrados,
-    metaVentasUSD: Number(process.env.META_VENTAS_USD ?? 2400),
+    metaVentasUSD: auth.ctx.empresa.metaVentasUSD,
     pautaActiva,
     diasActivosPauta: Math.round(diasActivosPauta * 100) / 100,
     diaDelMesPauta,

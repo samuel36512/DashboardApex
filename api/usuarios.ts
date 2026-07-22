@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getSupabase } from "./_lib/supabase";
-import { EMPRESA_ID_ACTUAL } from "./_lib/empresaActual";
+import { getAccessToken, requireAuth } from "./_lib/auth";
 
 const LIMITE = 500;
 
@@ -9,31 +9,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const authHeader = req.headers.authorization ?? "";
-  const accessToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-  if (!accessToken) {
-    return res.status(401).json({ error: "No autorizado" });
-  }
-
   const supabase = getSupabase();
-
-  const { data: userData, error: userError } = await supabase.auth.getUser(accessToken);
-  if (userError || !userData?.user) {
-    return res.status(401).json({ error: "Sesion invalida o vencida" });
+  const auth = await requireAuth(supabase, getAccessToken(req));
+  if (!auth.ok) {
+    return res.status(auth.status).json({ error: auth.error });
   }
-
-  const { data: perfil, error: perfilError } = await supabase
-    .from("perfiles")
-    .select("rol, agentes(nombre)")
-    .eq("id", userData.user.id)
-    .maybeSingle();
-  if (perfilError || !perfil) {
-    return res.status(403).json({ error: "Tu cuenta no tiene un perfil asignado" });
-  }
-
-  const rol = (perfil as any).rol as string;
-  const agenteRel = (perfil as any).agentes;
-  const miNombre: string | undefined = Array.isArray(agenteRel) ? agenteRel[0]?.nombre : agenteRel?.nombre;
+  const { empresaId, rol, agenteNombre: miNombre } = auth.ctx;
 
   const desde = typeof req.query.desde === "string" ? req.query.desde : "";
   const hasta = typeof req.query.hasta === "string" ? req.query.hasta : "";
@@ -49,7 +30,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .from("eventos")
       .select("contacto_id, contacto_nombre, contacto_telefono, agente, fecha")
       .eq("tipo", tipo)
-      .eq("empresa_id", EMPRESA_ID_ACTUAL)
+      .eq("empresa_id", empresaId)
       .not("contacto_id", "like", "baseline-%")
       .order("fecha", { ascending: false })
       .limit(LIMITE);
@@ -84,7 +65,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .from("agentes")
         .select("nombre")
         .eq("activo", true)
-        .eq("empresa_id", EMPRESA_ID_ACTUAL)
+        .eq("empresa_id", empresaId)
         .order("nombre");
       if (agentesError) throw new Error(`Error leyendo agentes: ${agentesError.message}`);
       agentesActivos = (agentesRows ?? []).map((a) => a.nombre);

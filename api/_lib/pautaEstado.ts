@@ -1,6 +1,5 @@
 import type { getSupabase } from "./supabase";
 import { diaDelMesColombia } from "./agentTier";
-import { EMPRESA_ID_ACTUAL } from "./empresaActual";
 
 type Supabase = ReturnType<typeof getSupabase>;
 
@@ -18,8 +17,8 @@ interface PautaEstadoRow {
   periodo: string;
 }
 
-async function leerEstado(supabase: Supabase): Promise<PautaEstadoRow> {
-  const { data } = await supabase.from("pauta_estado").select("*").eq("empresa_id", EMPRESA_ID_ACTUAL).maybeSingle();
+async function leerEstado(supabase: Supabase, empresaId: number): Promise<PautaEstadoRow> {
+  const { data } = await supabase.from("pauta_estado").select("*").eq("empresa_id", empresaId).maybeSingle();
   const periodoActual = periodoActualColombia();
   if (!data) {
     return { activa: true, desde: new Date().toISOString(), dias_inactivos_mes: 0, periodo: periodoActual };
@@ -37,9 +36,10 @@ async function leerEstado(supabase: Supabase): Promise<PautaEstadoRow> {
 // por FTD refleje la inversion real y no asuma que el anuncio corrio todos
 // los dias del mes.
 export async function getDiasActivosPautaMes(
-  supabase: Supabase
+  supabase: Supabase,
+  empresaId: number
 ): Promise<{ diaDelMes: number; diasActivos: number; activa: boolean }> {
-  const estado = await leerEstado(supabase);
+  const estado = await leerEstado(supabase, empresaId);
   const diaDelMes = diaDelMesColombia();
   let diasInactivos = Number(estado.dias_inactivos_mes) || 0;
   if (!estado.activa) {
@@ -50,8 +50,8 @@ export async function getDiasActivosPautaMes(
   return { diaDelMes, diasActivos, activa: estado.activa };
 }
 
-export async function toggleActiva(supabase: Supabase): Promise<{ activa: boolean }> {
-  const estado = await leerEstado(supabase);
+export async function toggleActiva(supabase: Supabase, empresaId: number): Promise<{ activa: boolean }> {
+  const estado = await leerEstado(supabase, empresaId);
   const periodoActual = periodoActualColombia();
   const ahora = new Date();
   let diasInactivosMes = Number(estado.dias_inactivos_mes) || 0;
@@ -64,7 +64,7 @@ export async function toggleActiva(supabase: Supabase): Promise<{ activa: boolea
 
   const nuevaActiva = !estado.activa;
   const { error } = await supabase.from("pauta_estado").upsert({
-    empresa_id: EMPRESA_ID_ACTUAL,
+    empresa_id: empresaId,
     activa: nuevaActiva,
     desde: ahora.toISOString(),
     dias_inactivos_mes: diasInactivosMes,
