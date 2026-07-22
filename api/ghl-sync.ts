@@ -456,6 +456,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       agentCursor = undefined;
     }
 
+    // Si esta corrida termino los 20 agentes (no se corto por tiempo), el
+    // cursor se reinicia al principio para el proximo ciclo - si se deja
+    // apuntando "un lugar mas alla del ultimo agente", la siguiente corrida
+    // nunca vuelve a entrar al for (la condicion ya arranca en falso) y
+    // deja de revisar leads nuevos para siempre.
+    if (completo) {
+      nextCursor.leadsAgentIndex = 0;
+      nextCursor.leadsAgentCursor = undefined;
+    }
+
     resumen.agentes = { agentesProcesados, totalAgentes: agentesList.length, contactosRevisados, eventosGuardados, completo };
 
     resumen.backfillNombres = await backfillNombres(headers, supabase, started, empresaId);
