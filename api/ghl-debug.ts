@@ -1,11 +1,9 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getSupabase } from "./_lib/supabase";
+import { resolveEmpresaFromSecret } from "./_lib/tenant";
 
 const GHL_BASE = "https://services.leadconnectorhq.com";
 const GHL_VERSION = "2021-07-28";
-const PIPELINE_ID = "oRjd1pUxOgNbzkdLBjWC";
-const REGISTRADO_STAGE_ID = "09b221aa-9791-4f05-8869-1b4ac8c86e06";
-const FTD_STAGE_ID = "3796b590-4fa6-4ef9-9b27-4aca989f6fd3";
 const PAGE_LIMIT = 100;
 
 // Compara, para un agente puntual, todas sus oportunidades de un tipo
@@ -23,27 +21,30 @@ const PAGE_LIMIT = 100;
 async function compararAgente(
   headers: Record<string, string>,
   locationId: string,
+  pipelineId: string,
+  stageId: string,
   agenteNombre: string,
-  tipo: "registro" | "ftd"
+  tipo: "registro" | "ftd",
+  empresaId: number
 ) {
   const supabase = getSupabase();
   const { data: agenteRow, error: agenteError } = await supabase
     .from("agentes")
     .select("ghl_user_id, nombre")
+    .eq("empresa_id", empresaId)
     .ilike("nombre", `%${agenteNombre}%`)
     .maybeSingle();
   if (agenteError || !agenteRow) {
     return { error: `No encontre un agente que coincida con "${agenteNombre}"` };
   }
 
-  const stageId = tipo === "ftd" ? FTD_STAGE_ID : REGISTRADO_STAGE_ID;
   const opportunities: any[] = [];
   let startAfter: number | undefined;
   let startAfterId: string | undefined;
   for (;;) {
     const params = new URLSearchParams({
       location_id: locationId,
-      pipeline_id: PIPELINE_ID,
+      pipeline_id: pipelineId,
       pipeline_stage_id: stageId,
       status: "all",
       limit: String(PAGE_LIMIT),
@@ -68,6 +69,7 @@ async function compararAgente(
     .from("eventos")
     .select("contacto_id")
     .eq("agente", agenteRow.nombre)
+    .eq("empresa_id", empresaId)
     .eq("tipo", tipo);
   const idsGuardados = new Set((guardados ?? []).map((r) => r.contacto_id));
 
@@ -114,28 +116,35 @@ async function compararAgente(
 async function barridoGeneral(
   headers: Record<string, string>,
   locationId: string,
-  tipo: "registro" | "ftd"
+  pipelineId: string,
+  stageId: string,
+  tipo: "registro" | "ftd",
+  empresaId: number
 ) {
   const supabase = getSupabase();
 
-  const { data: agentesRows } = await supabase.from("agentes").select("ghl_user_id, nombre").eq("activo", true);
+  const { data: agentesRows } = await supabase
+    .from("agentes")
+    .select("ghl_user_id, nombre")
+    .eq("activo", true)
+    .eq("empresa_id", empresaId);
   const agentesById = new Map((agentesRows ?? []).map((a) => [a.ghl_user_id, a.nombre]));
 
   const { data: cutoffRow } = await supabase
     .from("sync_state")
     .select("value")
+    .eq("empresa_id", empresaId)
     .eq("key", "registro_ftd_cutoff")
     .maybeSingle();
   const cutoffMs = cutoffRow?.value ? new Date(cutoffRow.value as string).getTime() : Date.now();
 
-  const stageId = tipo === "ftd" ? FTD_STAGE_ID : REGISTRADO_STAGE_ID;
   const opportunities: any[] = [];
   let startAfter: number | undefined;
   let startAfterId: string | undefined;
   for (;;) {
     const params = new URLSearchParams({
       location_id: locationId,
-      pipeline_id: PIPELINE_ID,
+      pipeline_id: pipelineId,
       pipeline_stage_id: stageId,
       status: "all",
       limit: String(PAGE_LIMIT),
@@ -156,7 +165,11 @@ async function barridoGeneral(
     startAfterId = meta.startAfterId;
   }
 
-  const { data: guardadosRows } = await supabase.from("eventos").select("contacto_id, agente").eq("tipo", tipo);
+  const { data: guardadosRows } = await supabase
+    .from("eventos")
+    .select("contacto_id, agente")
+    .eq("tipo", tipo)
+    .eq("empresa_id", empresaId);
   const guardadosSet = new Set((guardadosRows ?? []).map((r) => r.contacto_id));
 
   const fechaDe = (o: any) =>
@@ -200,15 +213,18 @@ async function barridoGeneral(
 // el pipeline principal (etapa, fechas, dueno asignado), para diagnosticar
 // casos puntuales sin tener que adivinar por que un registro/ftd no aparece.
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const secret = process.env.WEBHOOK_SECRET;
-  if (!secret || req.query.key !== secret) {
+  const supabase = getSupabase();
+  const providedSecret = typeof req.query.key === "string" ? req.query.key : "";
+  const empresa = await resolveEmpresaFromSecret(supabase, providedSecret);
+  if (!empresa) {
     return res.status(401).json({ error: "No autorizado. Agregá ?key=TU_WEBHOOK_SECRET a la URL." });
   }
+  const empresaId = empresa.id;
 
-  const token = process.env.GHL_API_TOKEN;
-  const locationId = process.env.GHL_LOCATION_ID;
+  const token = empresa.ghlApiToken;
+  const locationId = empresa.ghlLocationId;
   if (!token || !locationId) {
-    return res.status(500).json({ error: "Faltan GHL_API_TOKEN o GHL_LOCATION_ID en Vercel" });
+    return res.status(500).json({ error: "Faltan ghl_api_token o ghl_location_id configurados para esta empresa" });
   }
 
   const headers = {
@@ -218,8 +234,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   };
 
   if (req.query.barrido === "1") {
+    if (!empresa.ghlPipelineId || !empresa.ghlRegistradoStageId || !empresa.ghlFtdStageId) {
+      return res.status(500).json({ error: "Faltan los IDs de pipeline/etapas configurados para esta empresa" });
+    }
     const tipo = req.query.tipo === "ftd" ? "ftd" : "registro";
-    const resultado = await barridoGeneral(headers, locationId, tipo);
+    const stageId = tipo === "ftd" ? empresa.ghlFtdStageId : empresa.ghlRegistradoStageId;
+    const resultado = await barridoGeneral(headers, locationId, empresa.ghlPipelineId, stageId, tipo, empresaId);
     return res.status(200).json(resultado);
   }
 
@@ -229,10 +249,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // "sinDueno" y el sync la descarta en silencio.
   const agenteIdQuery = typeof req.query.agenteid === "string" ? req.query.agenteid.trim() : "";
   if (agenteIdQuery) {
-    const supabase = getSupabase();
     const { data, error } = await supabase
       .from("agentes")
       .select("nombre, ghl_user_id, activo")
+      .eq("empresa_id", empresaId)
       .ilike("nombre", `%${agenteIdQuery}%`);
     if (error) return res.status(500).json({ error: error.message });
     return res.status(200).json({ agentes: data ?? [] });
@@ -243,11 +263,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // tener que inferirlo comparando contra GHL.
   const checkEventoId = typeof req.query.checkevento === "string" ? req.query.checkevento.trim() : "";
   if (checkEventoId) {
-    const supabase = getSupabase();
     const { data, error } = await supabase
       .from("eventos")
       .select("contacto_id, agente, tipo, fecha, contacto_nombre, contacto_telefono, creado_en")
-      .eq("contacto_id", checkEventoId);
+      .eq("contacto_id", checkEventoId)
+      .eq("empresa_id", empresaId);
     if (error) return res.status(500).json({ error: error.message });
     return res.status(200).json({ eventos: data ?? [] });
   }
@@ -257,11 +277,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // un rango que se este filtrando (ej. "Este mes"), ese historico
   // desaparece del conteo aunque siga estando en la base.
   if (req.query.baseline === "1") {
-    const supabase = getSupabase();
     const { data, error } = await supabase
       .from("eventos")
       .select("tipo, fecha, agente")
-      .like("contacto_id", "baseline-%");
+      .like("contacto_id", "baseline-%")
+      .eq("empresa_id", empresaId);
     if (error) return res.status(500).json({ error: error.message });
     const rows = data ?? [];
     const porTipo: Record<string, { cantidad: number; fechaMin: string; fechaMax: string }> = {};
@@ -276,10 +296,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (req.query.cutoff === "1") {
-    const supabase = getSupabase();
     const { data: cutoffRow } = await supabase
       .from("sync_state")
       .select("value")
+      .eq("empresa_id", empresaId)
       .eq("key", "registro_ftd_cutoff")
       .maybeSingle();
     return res.status(200).json({ registro_ftd_cutoff: cutoffRow?.value ?? null });
@@ -314,8 +334,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const agenteQuery = typeof req.query.agente === "string" ? req.query.agente.trim() : "";
   if (agenteQuery) {
+    if (!empresa.ghlPipelineId || !empresa.ghlRegistradoStageId || !empresa.ghlFtdStageId) {
+      return res.status(500).json({ error: "Faltan los IDs de pipeline/etapas configurados para esta empresa" });
+    }
     const tipo = req.query.tipo === "registro" ? "registro" : "ftd";
-    const comparacion = await compararAgente(headers, locationId, agenteQuery, tipo);
+    const stageId = tipo === "ftd" ? empresa.ghlFtdStageId : empresa.ghlRegistradoStageId;
+    const comparacion = await compararAgente(headers, locationId, empresa.ghlPipelineId, stageId, agenteQuery, tipo, empresaId);
     return res.status(200).json(comparacion);
   }
 
@@ -328,6 +352,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         "Agregá ?agente=NombreAgente (compara todo su registro/ftd), o ?nombre=NombreDelCliente, o ?contactId=ID, o ?opportunityId=ID",
     });
   }
+  if (!empresa.ghlPipelineId || !empresa.ghlFtdStageId) {
+    return res.status(500).json({ error: "Faltan los IDs de pipeline/etapas configurados para esta empresa" });
+  }
+  const pipelineId = empresa.ghlPipelineId;
+  const ftdStageId = empresa.ghlFtdStageId;
 
   let contacts: any[] = [];
 
@@ -361,7 +390,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const contactFull = contactBody?.contact ?? c;
     const oppParams = new URLSearchParams({
       location_id: locationId,
-      pipeline_id: PIPELINE_ID,
+      pipeline_id: pipelineId,
       contact_id: c.id,
       status: "all",
       limit: "20",
@@ -381,7 +410,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       opportunitiesDeEsteContacto: propias.map((o) => ({
         id: o.id,
         pipelineStageId: o.pipelineStageId,
-        esEtapaFtd: o.pipelineStageId === FTD_STAGE_ID,
+        esEtapaFtd: o.pipelineStageId === ftdStageId,
         opportunityAsignadaA: o.assignedTo,
         createdAt: o.createdAt,
         lastStageChangeAt: o.lastStageChangeAt,

@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getSupabase } from "../_lib/supabase";
-import { parsePayload, timingSafeEqual } from "../_lib/validation";
-import { EMPRESA_ID_ACTUAL } from "../_lib/empresaActual";
+import { parsePayload } from "../_lib/validation";
+import { resolveEmpresaFromSecret } from "../_lib/tenant";
 
 const TIPOS = new Set(["lead", "registro", "ftd", "venta"]);
 
@@ -15,9 +15,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(404).json({ error: "Not found" });
   }
 
-  const secret = process.env.WEBHOOK_SECRET;
-  const auth = req.headers.authorization ?? "";
-  if (!secret || !timingSafeEqual(auth, `Bearer ${secret}`)) {
+  const authHeader = req.headers.authorization ?? "";
+  const providedSecret = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  const supabase = getSupabase();
+  const empresa = await resolveEmpresaFromSecret(supabase, providedSecret);
+  if (!empresa) {
     return res.status(401).json({ error: "No autorizado" });
   }
 
@@ -31,12 +33,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: `monto es requerido para el evento ${tipo}` });
   }
 
-  const supabase = getSupabase();
-  // upsert por (contacto_id, tipo): si GHL reenvia el mismo evento (retry) actualiza en vez de duplicar el conteo.
+  // upsert por (empresa_id, contacto_id, tipo): si GHL reenvia el mismo evento (retry) actualiza en vez de duplicar el conteo.
   const { error } = await supabase
     .from("eventos")
     .upsert(
-      { contacto_id, agente, tipo, monto: monto ?? null, fecha, empresa_id: EMPRESA_ID_ACTUAL },
+      { contacto_id, agente, tipo, monto: monto ?? null, fecha, empresa_id: empresa.id },
       { onConflict: "empresa_id,contacto_id,tipo" }
     );
 

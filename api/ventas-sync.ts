@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import crypto from "crypto";
 import { getSupabase } from "./_lib/supabase";
-import { EMPRESA_ID_ACTUAL } from "./_lib/empresaActual";
+import { resolveEmpresaFromSecret } from "./_lib/tenant";
 
 const SHEETS_BASE = "https://sheets.googleapis.com/v4/spreadsheets";
 
@@ -133,18 +133,19 @@ const LOCK_KEY = "ventas_sync_lock";
 const LOCK_VIGENCIA_MS = 4 * 60 * 1000;
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const secret = process.env.WEBHOOK_SECRET;
-  if (!secret || req.query.key !== secret) {
+  const supabase = getSupabase();
+  const providedSecret = typeof req.query.key === "string" ? req.query.key : "";
+  const empresa = await resolveEmpresaFromSecret(supabase, providedSecret);
+  if (!empresa) {
     return res.status(401).json({ error: "No autorizado. Agregá ?key=TU_WEBHOOK_SECRET a la URL." });
   }
+  const empresaId = empresa.id;
 
   const credsJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
-  const sheetId = process.env.VENTAS_SHEET_ID;
+  const sheetId = empresa.ventasSheetId;
   if (!credsJson || !sheetId) {
-    return res.status(500).json({ error: "Faltan GOOGLE_SERVICE_ACCOUNT_JSON o VENTAS_SHEET_ID en Vercel" });
+    return res.status(500).json({ error: "Falta GOOGLE_SERVICE_ACCOUNT_JSON en Vercel o ventas_sheet_id para esta empresa" });
   }
-
-  const supabase = getSupabase();
 
   // Si el cron (u otro disparador) reintenta por timeout mientras la
   // sincronizacion anterior todavia esta corriendo, dos ejecuciones casi
@@ -157,18 +158,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { data: candadoRow } = await supabase
     .from("sync_state")
     .select("value")
-    .eq("empresa_id", EMPRESA_ID_ACTUAL)
+    .eq("empresa_id", empresaId)
     .eq("key", LOCK_KEY)
     .maybeSingle();
   const candadoDesde = candadoRow?.value ? new Date(candadoRow.value as string).getTime() : 0;
   if (candadoDesde && Date.now() - candadoDesde >= LOCK_VIGENCIA_MS) {
     // Candado viejo (de una corrida anterior que no lo libero bien) - se
     // limpia antes de intentar tomarlo de nuevo.
-    await supabase.from("sync_state").delete().eq("empresa_id", EMPRESA_ID_ACTUAL).eq("key", LOCK_KEY);
+    await supabase.from("sync_state").delete().eq("empresa_id", empresaId).eq("key", LOCK_KEY);
   }
   const { error: candadoError } = await supabase
     .from("sync_state")
-    .insert({ key: LOCK_KEY, value: new Date().toISOString(), empresa_id: EMPRESA_ID_ACTUAL });
+    .insert({ key: LOCK_KEY, value: new Date().toISOString(), empresa_id: empresaId });
   if (candadoError) {
     if (candadoError.code === "23505") {
       return res.status(409).json({ error: "Ya hay una sincronizacion de ventas en curso, esperá un momento y volvé a intentar." });
@@ -183,7 +184,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .from("agentes")
       .select("nombre, email_personal")
       .eq("activo", true)
-      .eq("empresa_id", EMPRESA_ID_ACTUAL);
+      .eq("empresa_id", empresaId);
     if (agentesError) throw new Error(`Error leyendo agentes: ${agentesError.message}`);
     const agentesActivos = (agentesRows ?? []).map((a) => a.nombre);
     const emailToAgente = new Map<string, string>();
@@ -201,7 +202,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { data: aliasRows, error: aliasRowsError } = await supabase
       .from("agente_alias")
       .select("alias_normalizado, agentes(nombre)")
-      .eq("empresa_id", EMPRESA_ID_ACTUAL);
+      .eq("empresa_id", empresaId);
     if (aliasRowsError) throw new Error(`Error leyendo alias de agentes: ${aliasRowsError.message}`);
     const aliasToAgente = new Map<string, string>();
     for (const row of aliasRows ?? []) {
@@ -223,7 +224,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .from("eventos")
         .select("contacto_id, agente, producto, monto, fecha, contacto_nombre")
         .eq("tipo", "venta")
-        .eq("empresa_id", EMPRESA_ID_ACTUAL)
+        .eq("empresa_id", empresaId)
         .range(offset, offset + PAGE_FIRMAS - 1);
       if (error) throw new Error(`Error leyendo ventas existentes: ${error.message}`);
       for (const row of page ?? []) {
@@ -363,7 +364,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         producto: productoFinal,
         contacto_nombre: cliente,
         fecha: fechaIso,
-        empresa_id: EMPRESA_ID_ACTUAL,
+        empresa_id: empresaId,
       });
     }
 
@@ -397,6 +398,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } catch (err: any) {
     return res.status(502).json({ error: err?.message || "Error sincronizando ventas" });
   } finally {
-    await supabase.from("sync_state").delete().eq("empresa_id", EMPRESA_ID_ACTUAL).eq("key", LOCK_KEY);
+    await supabase.from("sync_state").delete().eq("empresa_id", empresaId).eq("key", LOCK_KEY);
   }
 }

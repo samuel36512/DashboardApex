@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getSupabase } from "./_lib/supabase";
-import { EMPRESA_ID_ACTUAL } from "./_lib/empresaActual";
+import { resolveEmpresaFromSecret } from "./_lib/tenant";
 
 const GHL_BASE = "https://services.leadconnectorhq.com";
 const GHL_VERSION = "2021-07-28";
@@ -10,10 +10,6 @@ const CURSOR_KEY = "ghl_sync_cursor";
 const CUTOFF_KEY = "registro_ftd_cutoff";
 const PAGE_LIMIT = 100;
 const MAX_RETRIES_429 = 4;
-
-const PIPELINE_ID = "oRjd1pUxOgNbzkdLBjWC";
-const REGISTRADO_STAGE_ID = "09b221aa-9791-4f05-8869-1b4ac8c86e06";
-const FTD_STAGE_ID = "3796b590-4fa6-4ef9-9b27-4aca989f6fd3";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -106,12 +102,14 @@ function timeLeft(started: number): number {
 async function cargarEtapaPipeline(
   headers: Record<string, string>,
   locationId: string,
+  pipelineId: string,
   stageId: string,
   tipo: "registro" | "ftd",
   fechaDe: (o: any) => string,
   cutoffMs: number,
   agentesById: Map<string, string>,
-  started: number
+  started: number,
+  empresaId: number
 ) {
   const rows: EventoRow[] = [];
   let startAfter: number | undefined;
@@ -122,7 +120,7 @@ async function cargarEtapaPipeline(
   for (;;) {
     const params = new URLSearchParams({
       location_id: locationId,
-      pipeline_id: PIPELINE_ID,
+      pipeline_id: pipelineId,
       pipeline_stage_id: stageId,
       status: "all",
       limit: String(PAGE_LIMIT),
@@ -149,7 +147,7 @@ async function cargarEtapaPipeline(
 
       const fecha = fechaDe(o);
       if (new Date(fecha).getTime() > cutoffMs) {
-        rows.push({ contacto_id: o.contactId, agente, tipo, fecha, empresa_id: EMPRESA_ID_ACTUAL });
+        rows.push({ contacto_id: o.contactId, agente, tipo, fecha, empresa_id: empresaId });
       }
     }
 
@@ -185,13 +183,13 @@ async function cargarEtapaPipeline(
 // momento). Se procesa en lotes chicos por corrida para no competir por
 // tiempo con el resto del sync - con el cron corriendo periodicamente, se
 // termina de completar solo en unas pocas corridas.
-async function backfillNombres(headers: Record<string, string>, supabase: Supabase, started: number) {
+async function backfillNombres(headers: Record<string, string>, supabase: Supabase, started: number, empresaId: number) {
   if (timeLeft(started) < 8000) return { actualizados: 0 };
 
   const { data: faltantes } = await supabase
     .from("eventos")
     .select("id, contacto_id")
-    .eq("empresa_id", EMPRESA_ID_ACTUAL)
+    .eq("empresa_id", empresaId)
     .in("tipo", ["registro", "ftd"])
     .or("contacto_nombre.is.null,contacto_telefono.is.null")
     .not("contacto_id", "like", "baseline-%")
@@ -227,7 +225,8 @@ async function syncAgente(
   locationId: string,
   supabase: Supabase,
   started: number,
-  cursor: SearchCursor | undefined
+  cursor: SearchCursor | undefined,
+  empresaId: number
 ) {
   let searchAfter = cursor?.searchAfter;
   let contactosRevisados = 0;
@@ -258,7 +257,7 @@ async function syncAgente(
     for (const c of contacts) {
       contactosRevisados++;
       const fecha = c.dateAdded || c.dateUpdated || new Date().toISOString();
-      rows.push({ contacto_id: c.id, agente: agenteNombre, tipo: "lead", fecha, empresa_id: EMPRESA_ID_ACTUAL });
+      rows.push({ contacto_id: c.id, agente: agenteNombre, tipo: "lead", fecha, empresa_id: empresaId });
     }
     if (rows.length > 0) {
       const { error } = await supabase.from("eventos").upsert(rows, { onConflict: "empresa_id,contacto_id,tipo" });
@@ -276,25 +275,30 @@ async function syncAgente(
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const secret = process.env.WEBHOOK_SECRET;
-  if (!secret || req.query.key !== secret) {
+  const supabase = getSupabase();
+  const providedSecret = typeof req.query.key === "string" ? req.query.key : "";
+  const empresa = await resolveEmpresaFromSecret(supabase, providedSecret);
+  if (!empresa) {
     return res.status(401).json({ error: "No autorizado. Agregá ?key=TU_WEBHOOK_SECRET a la URL." });
   }
+  const empresaId = empresa.id;
 
-  const token = process.env.GHL_API_TOKEN;
-  const locationId = process.env.GHL_LOCATION_ID;
-  if (!token || !locationId) {
-    return res.status(500).json({ error: "Faltan GHL_API_TOKEN o GHL_LOCATION_ID en Vercel" });
+  const token = empresa.ghlApiToken;
+  const locationId = empresa.ghlLocationId;
+  const pipelineId = empresa.ghlPipelineId;
+  const registradoStageId = empresa.ghlRegistradoStageId;
+  const ftdStageId = empresa.ghlFtdStageId;
+  if (!token || !locationId || !pipelineId || !registradoStageId || !ftdStageId) {
+    return res.status(500).json({ error: "Faltan credenciales o IDs de GHL configurados para esta empresa" });
   }
 
-  const supabase = getSupabase();
   const started = Date.now();
 
   const { data: agentesRows, error: agentesError } = await supabase
     .from("agentes")
     .select("ghl_user_id, nombre")
     .eq("activo", true)
-    .eq("empresa_id", EMPRESA_ID_ACTUAL)
+    .eq("empresa_id", empresaId)
     .order("ghl_user_id");
   if (agentesError) {
     return res.status(500).json({ error: "No se pudo leer la tabla agentes", detail: agentesError.message });
@@ -308,7 +312,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { data: cursorRow } = await supabase
     .from("sync_state")
     .select("value")
-    .eq("empresa_id", EMPRESA_ID_ACTUAL)
+    .eq("empresa_id", empresaId)
     .eq("key", CURSOR_KEY)
     .maybeSingle();
   const cursorState: CursorState = (cursorRow?.value as CursorState) || {};
@@ -316,7 +320,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { data: cutoffRow } = await supabase
     .from("sync_state")
     .select("value")
-    .eq("empresa_id", EMPRESA_ID_ACTUAL)
+    .eq("empresa_id", empresaId)
     .eq("key", CUTOFF_KEY)
     .maybeSingle();
   const cutoffMs = cutoffRow?.value ? new Date(cutoffRow.value as string).getTime() : Date.now();
@@ -335,22 +339,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const registro = await cargarEtapaPipeline(
       headers,
       locationId,
-      REGISTRADO_STAGE_ID,
+      pipelineId,
+      registradoStageId,
       "registro",
       (o) => o.createdAt || o.updatedAt || new Date().toISOString(),
       cutoffMs,
       agentesById,
-      started
+      started,
+      empresaId
     );
     const ftd = await cargarEtapaPipeline(
       headers,
       locationId,
-      FTD_STAGE_ID,
+      pipelineId,
+      ftdStageId,
       "ftd",
       (o) => o.lastStageChangeAt || o.updatedAt || o.createdAt || new Date().toISOString(),
       cutoffMs,
       agentesById,
-      started
+      started,
+      empresaId
     );
     const pipelineRows = [...registro.rows, ...ftd.rows];
     if (pipelineRows.length > 0) {
@@ -386,7 +394,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         locationId,
         supabase,
         started,
-        agentCursor
+        agentCursor,
+        empresaId
       );
       contactosRevisados += result.contactosRevisados;
       eventosGuardados += result.eventosGuardados;
@@ -403,13 +412,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     resumen.agentes = { agentesProcesados, totalAgentes: agentesList.length, contactosRevisados, eventosGuardados, completo };
 
-    resumen.backfillNombres = await backfillNombres(headers, supabase, started);
+    resumen.backfillNombres = await backfillNombres(headers, supabase, started, empresaId);
   } catch (err: any) {
-    await supabase.from("sync_state").upsert({ key: CURSOR_KEY, value: nextCursor, empresa_id: EMPRESA_ID_ACTUAL });
+    await supabase.from("sync_state").upsert({ key: CURSOR_KEY, value: nextCursor, empresa_id: empresaId });
     return res.status(502).json({ error: err?.message || "Error sincronizando con GHL", resumen });
   }
 
-  await supabase.from("sync_state").upsert({ key: CURSOR_KEY, value: nextCursor, empresa_id: EMPRESA_ID_ACTUAL });
+  await supabase.from("sync_state").upsert({ key: CURSOR_KEY, value: nextCursor, empresa_id: empresaId });
 
   res.setHeader("Cache-Control", "no-store");
   return res.status(200).json({ ok: true, ...resumen });
