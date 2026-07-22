@@ -1441,13 +1441,25 @@
       el("option", { value: "ftd", text: "FTD" }),
     ]);
 
+    var modoSelect = el("select", { class: "range-input" }, [
+      el("option", { value: "sumar", text: "Sumar" }),
+      el("option", { value: "restar", text: "Restar" }),
+    ]);
+
     var cantidadInput = el("input", { type: "number", class: "range-input", value: "1", min: "1", max: "200" });
     var fechaInput = el("input", { type: "date", class: "range-input" });
     var msg = el("span", { class: "admin-msg" });
     var btn = el("button", { class: "btn", text: "Agregar ajuste" });
 
+    modoSelect.addEventListener("change", function () {
+      var esRestar = modoSelect.value === "restar";
+      btn.textContent = esRestar ? "Restar ajuste" : "Agregar ajuste";
+      fechaInput.style.display = esRestar ? "none" : "";
+    });
+
     btn.addEventListener("click", function () {
       var cantidad = parseInt(cantidadInput.value, 10);
+      var modo = modoSelect.value;
       if (!agenteSelect.value) {
         msg.textContent = "Elegí un agente";
         return;
@@ -1457,13 +1469,14 @@
         return;
       }
       btn.disabled = true;
-      btn.textContent = "Agregando…";
+      btn.textContent = modo === "restar" ? "Restando…" : "Agregando…";
       fetch("/api/admin/ajuste-manual", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: "Bearer " + currentAccessToken },
         body: JSON.stringify({
           agenteId: Number(agenteSelect.value),
           tipo: tipoSelect.value,
+          modo: modo,
           cantidad: cantidad,
           fecha: fechaInput.value || undefined,
         }),
@@ -1473,17 +1486,22 @@
         })
         .then(function (r) {
           btn.disabled = false;
-          btn.textContent = "Agregar ajuste";
-          if (r.status !== 201) {
-            msg.textContent = r.body.error || "No se pudo agregar el ajuste";
+          btn.textContent = modo === "restar" ? "Restar ajuste" : "Agregar ajuste";
+          if (r.status !== 201 && r.status !== 200) {
+            msg.textContent = r.body.error || "No se pudo aplicar el ajuste";
             return;
           }
-          msg.textContent = "Listo: " + r.body.cantidad + " " + r.body.tipo + "(s) agregados a " + r.body.agente + ".";
+          if (modo === "restar") {
+            msg.textContent = "Listo: se restaron " + r.body.cantidadRestada + " " + r.body.tipo + "(s) de " + r.body.agente +
+              (r.body.incompleto ? " (no había más ajustes manuales de ese tipo para restar)." : ".");
+          } else {
+            msg.textContent = "Listo: " + r.body.cantidad + " " + r.body.tipo + "(s) agregados a " + r.body.agente + ".";
+          }
           loadMetrics(true, currentAccessToken);
         })
         .catch(function () {
           btn.disabled = false;
-          btn.textContent = "Agregar ajuste";
+          btn.textContent = modo === "restar" ? "Restar ajuste" : "Agregar ajuste";
           msg.textContent = "Error de red, probá de nuevo.";
         });
     });
@@ -1491,12 +1509,13 @@
     panel.appendChild(el("div", { class: "admin-row" }, [
       agenteSelect,
       tipoSelect,
+      modoSelect,
       cantidadInput,
       fechaInput,
       btn,
       msg,
     ]));
-    panel.appendChild(el("div", { class: "section-desc", text: "Si dejás la fecha vacía, se usa el momento actual." }));
+    panel.appendChild(el("div", { class: "section-desc", text: "Restar solo quita ajustes agregados a mano con este mismo botón, nunca actividad real sincronizada de GHL. Si dejás la fecha vacía al sumar, se usa el momento actual." }));
   }
 
   function renderContentState(node) {

@@ -4,6 +4,7 @@ import { getSupabase } from "../_lib/supabase";
 import { getAccessToken, requireDirector } from "../_lib/auth";
 
 const TIPOS_VALIDOS = ["lead", "registro", "ftd"] as const;
+const MODOS_VALIDOS = ["sumar", "restar"] as const;
 const CANTIDAD_MAXIMA = 200;
 
 // Fecha en Colombia (UTC-5): si el director elige un dia puntual se usa la
@@ -31,6 +32,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const body = (req.body ?? {}) as Record<string, unknown>;
   const agenteId = Number(body.agenteId);
   const tipo = typeof body.tipo === "string" ? body.tipo : "";
+  const modo = typeof body.modo === "string" && body.modo ? body.modo : "sumar";
   const cantidad = Math.trunc(Number(body.cantidad));
   const fechaInput = typeof body.fecha === "string" ? body.fecha.trim() : "";
 
@@ -39,6 +41,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   if (!TIPOS_VALIDOS.includes(tipo as (typeof TIPOS_VALIDOS)[number])) {
     return res.status(400).json({ error: "Tipo invalido - debe ser lead, registro o ftd" });
+  }
+  if (!MODOS_VALIDOS.includes(modo as (typeof MODOS_VALIDOS)[number])) {
+    return res.status(400).json({ error: "Modo invalido - debe ser sumar o restar" });
   }
   if (!Number.isFinite(cantidad) || cantidad < 1 || cantidad > CANTIDAD_MAXIMA) {
     return res.status(400).json({ error: `La cantidad debe ser un numero entre 1 y ${CANTIDAD_MAXIMA}` });
@@ -66,6 +71,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: "Agente no encontrado" });
   }
 
+  if (modo === "restar") {
+    // Solo se puede restar de lo que se sumo con este mismo boton (prefijo
+    // "ajuste-") - nunca de actividad real sincronizada desde GHL, para no
+    // arriesgar borrar historial real por error. Se quitan las mas
+    // recientes primero (lo mas probable que sea el ajuste equivocado).
+    const { data: candidatos, error: candidatosError } = await supabase
+      .from("eventos")
+      .select("id")
+      .eq("agente", agente.nombre)
+      .eq("tipo", tipo)
+      .eq("empresa_id", empresaId)
+      .like("contacto_id", "ajuste-%")
+      .order("creado_en", { ascending: false })
+      .limit(cantidad);
+    if (candidatosError) {
+      return res.status(500).json({ error: "Error buscando ajustes para restar: " + candidatosError.message });
+    }
+    const ids = (candidatos ?? []).map((c) => c.id);
+    if (ids.length === 0) {
+      return res.status(400).json({
+        error: `No hay ajustes manuales de ${tipo} para ${agente.nombre} que se puedan restar`,
+      });
+    }
+    const { error: deleteError } = await supabase.from("eventos").delete().in("id", ids);
+    if (deleteError) {
+      return res.status(500).json({ error: "Error restando el ajuste: " + deleteError.message });
+    }
+    return res.status(200).json({
+      ok: true,
+      agente: agente.nombre,
+      tipo,
+      modo,
+      cantidadPedida: cantidad,
+      cantidadRestada: ids.length,
+      incompleto: ids.length < cantidad,
+    });
+  }
+
   // contacto_id con prefijo "ajuste-" para poder distinguir estos registros
   // de los que llegan realmente sincronizados desde GHL, en caso de que
   // despues haga falta auditar o revertir un ajuste puntual.
@@ -82,5 +125,5 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: "Error guardando el ajuste: " + insertError.message });
   }
 
-  return res.status(201).json({ ok: true, agente: agente.nombre, tipo, cantidad, fecha });
+  return res.status(201).json({ ok: true, agente: agente.nombre, tipo, modo, cantidad, fecha });
 }
