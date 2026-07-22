@@ -2351,7 +2351,7 @@
       qs = "?desde=" + encodeURIComponent(localDayStartIso(currentDesde)) + "&hasta=" + encodeURIComponent(localDayEndIso(currentHasta));
     } else if (currentView === "usuarios" && usuariosDesde && usuariosHasta) {
       qs = "?desde=" + encodeURIComponent(localDayStartIso(usuariosDesde)) + "&hasta=" + encodeURIComponent(localDayEndIso(usuariosHasta));
-    } else if (currentView === "pago-director" || currentView === "mi-ganancia") {
+    } else if (currentView === "ranking" || currentView === "pago-director" || currentView === "mi-ganancia") {
       var hoyStr = fmtDate(new Date());
       var inicioMesStr = fmtDate(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
       qs = "?desde=" + encodeURIComponent(localDayStartIso(inicioMesStr)) + "&hasta=" + encodeURIComponent(localDayEndIso(hoyStr));
