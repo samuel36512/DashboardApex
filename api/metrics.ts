@@ -264,6 +264,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader("Cache-Control", "no-store");
   return res.status(200).json({
     agentes: agentesFiltrados,
+    empresaNombre: auth.ctx.empresaNombre,
     metaVentasUSD: auth.ctx.empresa.metaVentasUSD,
     pautaActiva,
     diasActivosPauta: Math.round(diasActivosPauta * 100) / 100,

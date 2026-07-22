@@ -935,6 +935,7 @@
   var currentAccessToken = null;
   var currentEmail = null;
   var currentRol = null;
+  var currentEmpresaNombre = "";
   var currentView = "welcome";
   var adminPanelOpen = false;
   var ajustePanelOpen = false;
@@ -981,7 +982,7 @@
     var panel = el("div", { class: "card login" }, [
       el("div", { class: "brand" }, [
         el("span", { class: "brand-mark" }),
-        el("span", { class: "brand-name" }, [document.createTextNode("APEX "), el("b", { text: "PRINCIPAL" })]),
+        el("span", { class: "brand-name" }, [el("b", { text: "Dashboard" })]),
       ]),
       el("h2", { text: "Conversión de Ventas" }),
       el("p", { text: "Ingresá con el email y la contraseña que te dieron." }),
@@ -1078,7 +1079,7 @@
     app.innerHTML = "";
     var wrap = el("div", { class: "welcome-wrap" }, [
       el("div", { class: "welcome-hero" }, [el("span", { class: "brand-mark" })]),
-      el("div", { class: "welcome-kicker" }, [document.createTextNode("APEX "), el("b", { text: "PRINCIPAL" })]),
+      el("div", { class: "welcome-kicker" }, [el("b", { text: currentEmpresaNombre || "Dashboard" })]),
       el("h1", { class: "welcome-title", text: "Bienvenido a tu dashboard" }),
       el("p", { class: "welcome-sub", text: currentEmail || "" }),
     ]);
@@ -1181,7 +1182,7 @@
       el("div", {}, [
         el("div", { class: "brand" }, [
           el("span", { class: "brand-mark" }),
-          el("span", { class: "brand-name" }, [document.createTextNode("APEX "), el("b", { text: "PRINCIPAL" })]),
+          el("span", { class: "brand-name" }, [el("b", { text: currentEmpresaNombre || "Dashboard" })]),
         ]),
         el("h1", { text: VIEW_TITLES[currentView] || "Conversión de Ventas" }),
       ]),
@@ -2366,6 +2367,7 @@
       })
       .then(function (data) {
         currentRol = data.rol;
+        if (data.empresaNombre !== undefined) currentEmpresaNombre = data.empresaNombre || "";
         if (currentView === "ranking") renderRankingView(data);
         else if (currentView === "inactividad") renderInactividadView(data);
         else if (currentView === "usuarios") renderUsuariosView(data);
@@ -2404,6 +2406,7 @@
         })
         .then(function (data) {
           currentRol = data.rol;
+          currentEmpresaNombre = data.empresaNombre || "";
           renderWelcome();
         })
         .catch(function (err) {

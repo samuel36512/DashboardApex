@@ -22,6 +22,7 @@ export interface AuthContext {
   userId: string;
   rol: "director" | "agente";
   empresaId: number;
+  empresaNombre: string;
   agenteId: number | null;
   agenteNombre: string | null;
   empresa: EmpresaRates;
@@ -47,7 +48,7 @@ export async function requireAuth(
   const { data: perfil, error: perfilError } = await supabase
     .from("perfiles")
     .select(
-      "rol, empresa_id, agente_id, agentes(nombre), empresas(tasa_pauta_ejecutivo_cop, tasa_pauta_junior_cop, comision_director_base_usd, comision_director_alta_usd, umbral_ftd_tasa_alta, tasa_comision_director_ventas, comision_por_ftd_usd, meta_ventas_usd, costo_por_lead_fijo_cop)"
+      "rol, empresa_id, agente_id, agentes(nombre), empresas(nombre, tasa_pauta_ejecutivo_cop, tasa_pauta_junior_cop, comision_director_base_usd, comision_director_alta_usd, umbral_ftd_tasa_alta, tasa_comision_director_ventas, comision_por_ftd_usd, meta_ventas_usd, costo_por_lead_fijo_cop)"
     )
     .eq("id", userData.user.id)
     .maybeSingle();
@@ -73,6 +74,7 @@ export async function requireAuth(
       userId: userData.user.id,
       rol: perfil.rol as "director" | "agente",
       empresaId: perfil.empresa_id as number,
+      empresaNombre: (empresaRow.nombre as string) ?? "",
       agenteId: (perfil.agente_id as number | null) ?? null,
       agenteNombre,
       empresa: {
