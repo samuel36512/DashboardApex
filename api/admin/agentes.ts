@@ -16,7 +16,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { data: agentesRows, error: agentesError } = await supabase
     .from("agentes")
-    .select("id, nombre")
+    .select("id, nombre, email_personal")
     .eq("activo", true)
     .eq("empresa_id", empresaId)
     .order("nombre");
@@ -44,6 +44,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     nombre: a.nombre,
     tieneAcceso: emailByAgenteId.has(a.id),
     email: emailByAgenteId.get(a.id) ?? null,
+    emailPersonal: a.email_personal ?? null,
   }));
 
   return res.status(200).json({ agentes });

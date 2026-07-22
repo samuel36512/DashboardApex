@@ -1,38 +1,9 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import crypto from "crypto";
 import { getSupabase } from "./_lib/supabase";
-import { EMAIL_TO_AGENTE } from "./_lib/agentEmails";
 import { EMPRESA_ID_ACTUAL } from "./_lib/empresaActual";
 
 const SHEETS_BASE = "https://sheets.googleapis.com/v4/spreadsheets";
-
-// Alias conocidos: nombre EXACTO (normalizado) tal como aparece en la
-// columna AGENTE de la hoja de ventas -> nombre real en nuestra tabla
-// agentes. La hoja es de TODA la empresa (decenas de personas que no son
-// nuestros agentes de ventas), asi que solo mapeamos lo que el director
-// confirmo explicitamente - cualquier otro nombre se ignora y se reporta
-// como "no reconocido" en vez de adivinar.
-const AGENTE_ALIASES: Record<string, string> = {
-  "nicolas andres correa rojas": "Nicolás Correa",
-  "maria paula guevara valencia valencia": "María Paula Guevara",
-  "juan sebastian ceballos": "Juan Ceballos",
-  "diego alejandro mora ruiz": "Diego Alejandro Mora",
-  "henry andres correa rojas": "Henry Andrés Correa",
-  "santiago santiago charry gutierrez": "Santiago Charry",
-  "daniela charry perdomo": "Daniela Charry",
-  "luna sandoval jovel": "Luna Sandoval",
-  "sergio gallo": "Sergio Gallo",
-  "angela maria galinded gutierrez": "Angela Galindez",
-  "angela maria galindez gutierrez": "Angela Galindez",
-  "jhon andres camacho aldana": "Jhon Camacho",
-  "santiago sandoval": "Santiago Sandoval",
-  "santiago sandoval andrade": "Santiago Sandoval",
-  "fernando sandoval andrade": "Fernando Sandoval",
-  "andry juliana camacho sanchez": "Andry Camacho",
-  "gabriel monteverde": "Gabriel Alejandro Monteverde",
-  "luis felipe charry perdomo": "Luis Felipe Charry",
-  "luis gomez": "Luis Gómez",
-};
 
 const MESES_TAB = [
   "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -58,7 +29,12 @@ function coincidePorPalabras(sheetNombreNorm: string, agenteNombre: string): boo
   return palabrasAgente.every((p) => palabrasSheet.includes(p));
 }
 
-function mapearAgente(sheetNombre: string, agentesActivos: string[]): string | null {
+function mapearAgente(
+  sheetNombre: string,
+  agentesActivos: string[],
+  emailToAgente: Map<string, string>,
+  aliasToAgente: Map<string, string>
+): string | null {
   // Algunas filas traen el nombre y el correo pegados en la misma celda,
   // separados por un salto de linea (ej. "Gab Mont\nGabrielmonteverde75@gmail.com")
   // - se intenta cada linea por separado (ademas del valor completo), para
@@ -76,11 +52,13 @@ function mapearAgente(sheetNombre: string, agentesActivos: string[]): string | n
   // se compara primero (exacto, sin acentos ni mayusculas de por medio).
   for (const candidato of candidatos) {
     const email = candidato.toLowerCase();
-    if (EMAIL_TO_AGENTE[email]) return EMAIL_TO_AGENTE[email];
+    const porEmail = emailToAgente.get(email);
+    if (porEmail) return porEmail;
   }
   for (const candidato of candidatos) {
     const norm = normalizar(candidato);
-    if (AGENTE_ALIASES[norm]) return AGENTE_ALIASES[norm];
+    const porAlias = aliasToAgente.get(norm);
+    if (porAlias) return porAlias;
   }
   for (const candidato of candidatos) {
     const norm = normalizar(candidato);
@@ -203,11 +181,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: agentesRows, error: agentesError } = await supabase
       .from("agentes")
-      .select("nombre")
+      .select("nombre, email_personal")
       .eq("activo", true)
       .eq("empresa_id", EMPRESA_ID_ACTUAL);
     if (agentesError) throw new Error(`Error leyendo agentes: ${agentesError.message}`);
     const agentesActivos = (agentesRows ?? []).map((a) => a.nombre);
+    const emailToAgente = new Map<string, string>();
+    for (const a of agentesRows ?? []) {
+      if (a.email_personal) emailToAgente.set(String(a.email_personal).toLowerCase(), a.nombre);
+    }
+
+    // Alias conocidos: nombre EXACTO (normalizado) tal como aparece en la
+    // columna AGENTE de la hoja de ventas -> nombre real en nuestra tabla
+    // agentes. La hoja es de TODA la empresa (decenas de personas que no
+    // son nuestros agentes de ventas), asi que solo se usa lo que el
+    // director confirmo explicitamente via el panel/SQL - cualquier otro
+    // nombre se ignora y se reporta como "no reconocido" en vez de
+    // adivinar.
+    const { data: aliasRows, error: aliasRowsError } = await supabase
+      .from("agente_alias")
+      .select("alias_normalizado, agentes(nombre)")
+      .eq("empresa_id", EMPRESA_ID_ACTUAL);
+    if (aliasRowsError) throw new Error(`Error leyendo alias de agentes: ${aliasRowsError.message}`);
+    const aliasToAgente = new Map<string, string>();
+    for (const row of aliasRows ?? []) {
+      const agenteRel = (row as any).agentes;
+      const nombre: string | undefined = Array.isArray(agenteRel) ? agenteRel[0]?.nombre : agenteRel?.nombre;
+      if (nombre) aliasToAgente.set(row.alias_normalizado, nombre);
+    }
 
     // Segunda barrera contra duplicados, independiente del ID calculado: se
     // arma una firma de negocio (agente+producto+monto+fecha+correo) por
@@ -312,14 +313,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // Si la fila SI es de uno de nuestros agentes, vale la pena saberlo -
         // significa que se esta perdiendo una venta real por falta de fecha,
         // no solo filas de gente ajena al equipo.
-        const agenteConocido = mapearAgente(agenteSheet, agentesActivos);
+        const agenteConocido = mapearAgente(agenteSheet, agentesActivos, emailToAgente, aliasToAgente);
         if (agenteConocido) {
           sinFechaConocidos.push({ agente: agenteConocido, cliente, producto, fechaCruda });
         }
         continue;
       }
 
-      const agente = mapearAgente(agenteSheet, agentesActivos);
+      const agente = mapearAgente(agenteSheet, agentesActivos, emailToAgente, aliasToAgente);
       if (!agente) {
         noReconocidos.add(agenteSheet);
         continue;

@@ -959,29 +959,6 @@
   var ventasDetalleHasta = "";
   var ventasDetalleAgente = "";
 
-  var KNOWN_EMAILS = {
-    "Ana Sánchez": "92anasp@gmail.com",
-    "Andry Camacho": "juliana1611sanchez@gmail.com",
-    "Angela Galindez": "Angela.Galindez@hotmail.com",
-    "Daniela Charry": "danielacharryp@gmail.com",
-    "Diego Alejandro Mora": "diego150905ruiz@gmail.com",
-    "Fernando Sandoval": "Sandovalandradefernando@gmail.com",
-    "Gabriel Alejandro Monteverde": "Gabrielmonteverde75@gmail.com",
-    "Henry Andrés Correa": "henryandrescorrea@hotmail.com",
-    "Jhon Camacho": "nxjaca25@gmail.com",
-    "Juan Ceballos": "Sebastianceballos0405@gmail.com",
-    "Juanita Sánchez": "princesamagicajuanita@gmail.com",
-    "Laura Charry": "laurasofia2297@gmail.com",
-    "Luis Felipe Charry": "pipech2220@gmail.com",
-    "Luis Gómez": "luis.andres162000@gmail.com",
-    "Luna Sandoval": "Linitajovel@gmail.com",
-    "María Paula Guevara": "mariapaulaguevaravalencia0@gmail.com",
-    "Nicolás Correa": "Nacr1204@gmail.com",
-    "Santiago Charry": "sentilli125@gmail.com",
-    "Santiago Sandoval": "santiagosandovalandrade95@gmail.com",
-    "Sergio Gallo": "vajumundial@gmail.com"
-  };
-
   var currency = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
   var currencyPrecise = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
   var currencyCOP = new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 });
@@ -1336,7 +1313,7 @@
         ]));
         return;
       }
-      var emailInput = el("input", { type: "email", value: KNOWN_EMAILS[a.nombre] || "" });
+      var emailInput = el("input", { type: "email", value: a.emailPersonal || "" });
       var msg = el("span", { class: "admin-msg" });
       var btn = el("button", { class: "btn", text: "Crear acceso" });
       btn.addEventListener("click", function () {

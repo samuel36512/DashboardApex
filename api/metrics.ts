@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getSupabase } from "./_lib/supabase";
-import { AGENTE_TIER, tasaDiariaCOP } from "./_lib/agentTier";
+import { tasaDiariaCOP } from "./_lib/agentTier";
 import { getDiasActivosPautaMes } from "./_lib/pautaEstado";
 import { getAccessToken, requireAuth } from "./_lib/auth";
 
@@ -35,7 +35,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // todo sale de eventos, igual que lead/venta.
   const { data: agentesRows, error: agentesError } = await supabase
     .from("agentes")
-    .select("nombre")
+    .select("nombre, tier")
     .eq("activo", true)
     .eq("empresa_id", empresaId);
   if (agentesError) {
@@ -43,8 +43,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const byAgent = new Map<string, AgentAgg>();
+  const tierByAgente = new Map<string, "ejecutivo" | "junior" | null>();
   for (const a of agentesRows ?? []) {
     byAgent.set(a.nombre, { leads: 0, registros: 0, ftds: 0, ventasUSD: 0, comisionUSD: 0 });
+    tierByAgente.set(a.nombre, (a.tier as "ejecutivo" | "junior" | null) ?? null);
   }
 
   // Supabase/PostgREST limita cada consulta a un maximo de filas (tipicamente
@@ -201,11 +203,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // que esto es una proyeccion, no una cifra contable exacta).
   const comisionPorFtd = auth.ctx.empresa.comisionPorFtdUSD;
 
+  const tasasPauta = {
+    ejecutivoCOP: auth.ctx.empresa.tasaPautaEjecutivoCOP,
+    juniorCOP: auth.ctx.empresa.tasaPautaJuniorCOP,
+  };
   const agentesBase = Array.from(byAgent.entries()).map(([agente, a]) => {
-    const tier = AGENTE_TIER[agente];
+    const tier = tierByAgente.get(agente) ?? null;
     const ftdsMes = ftdsMesPorAgente.get(agente) ?? 0;
     const leadsMes = leadsMesPorAgente.get(agente) ?? 0;
-    const tasaDiaria = tasaDiariaCOP(agente);
+    const tasaDiaria = tasaDiariaCOP(tier, tasasPauta);
     const gastoPautaCOP = tasaDiaria !== null ? Math.round(tasaDiaria * diasActivosPauta) : null;
     const costoPorFtdCOP = gastoPautaCOP !== null && ftdsMes > 0 ? Math.round(gastoPautaCOP / ftdsMes) : null;
     const membresiasMes = membresiasMesPorAgente.get(agente) ?? 0;

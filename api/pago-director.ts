@@ -32,14 +32,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { data: agentesRows, error: agentesError } = await supabase
     .from("agentes")
-    .select("nombre")
+    .select("nombre, tier")
     .eq("activo", true)
     .eq("empresa_id", empresaId);
   if (agentesError) {
     return res.status(500).json({ error: "Error leyendo agentes" });
   }
   const byAgent = new Map<string, { ftds: number; ventasUSD: number; leads: number }>();
-  for (const a of agentesRows ?? []) byAgent.set(a.nombre, { ftds: 0, ventasUSD: 0, leads: 0 });
+  const tierByAgente = new Map<string, "ejecutivo" | "junior" | null>();
+  for (const a of agentesRows ?? []) {
+    byAgent.set(a.nombre, { ftds: 0, ventasUSD: 0, leads: 0 });
+    tierByAgente.set(a.nombre, (a.tier as "ejecutivo" | "junior" | null) ?? null);
+  }
   const byProducto = new Map<string, { cantidad: number; ventasUSD: number }>();
 
   // FTD, leads y facturacion del equipo en el rango, desglosados por agente y
@@ -102,8 +106,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // costo por FTD real. Como desde/hasta ya vienen fijados al mes en curso
   // para esta vista, a.ftds/a.leads ya son los conteos reales del mes.
   const { diasActivos: diasActivosPauta } = await getDiasActivosPautaMes(supabase, empresaId);
+  const tasasPauta = {
+    ejecutivoCOP: auth.ctx.empresa.tasaPautaEjecutivoCOP,
+    juniorCOP: auth.ctx.empresa.tasaPautaJuniorCOP,
+  };
   const agentesBase = Array.from(byAgent.entries()).map(([agente, a]) => {
-    const tasaDiaria = tasaDiariaCOP(agente);
+    const tasaDiaria = tasaDiariaCOP(tierByAgente.get(agente) ?? null, tasasPauta);
     const gastoPautaCOP = tasaDiaria !== null ? Math.round(tasaDiaria * diasActivosPauta) : null;
     return { agente, ftds: a.ftds, ventasUSD: a.ventasUSD, leads: a.leads, gastoPautaCOP };
   });
