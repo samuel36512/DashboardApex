@@ -337,7 +337,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   };
 
   const resumen: Record<string, unknown> = {};
-  const nextCursor: CursorState = {};
+  // Arranca como una copia del cursor ya guardado (no vacio) - si esta
+  // corrida falla ANTES de tocar los leads (ej. en la etapa de pipeline),
+  // el progreso de leads ya hecho en corridas anteriores no se pisa. Se
+  // actualiza agente por agente mas abajo, asi que si falla A MITAD de los
+  // leads, lo ya guardado en esta misma corrida tampoco se pierde.
+  let nextCursor: CursorState = { ...cursorState };
 
   try {
     const registro = await cargarEtapaPipeline(
@@ -405,12 +410,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       eventosGuardados += result.eventosGuardados;
       agentesProcesados++;
 
+      // Se actualiza el cursor agente por agente (no solo al final del
+      // for) para que, si el PROXIMO agente tira una excepcion (timeout,
+      // etc.), el catch de abajo persista el avance real logrado hasta
+      // aca en vez de perderlo.
       if (!result.done) {
         completo = false;
         nextCursor.leadsAgentIndex = agentIndex;
         nextCursor.leadsAgentCursor = result.cursor;
         break;
       }
+      nextCursor.leadsAgentIndex = agentIndex + 1;
+      nextCursor.leadsAgentCursor = undefined;
       agentCursor = undefined;
     }
 
