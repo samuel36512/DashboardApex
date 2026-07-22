@@ -475,6 +475,13 @@
     color: var(--text-secondary);
     font-variant-numeric: tabular-nums;
   }
+  .hero-stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  .hero-stat-grid .hero-stat { padding: 26px 22px; }
 
   /* ---- Costo por FTD ---- */
   .cost-row {
@@ -1289,6 +1296,22 @@
     var content = el("div");
     var oficinas = data.oficinas || [];
     var agentes = (data.agentes || []).slice();
+
+    var totalFtdsGlobal = oficinas.reduce(function (acc, o) { return acc + (o.totalFtds || 0); }, 0);
+    var totalVentasGlobal = oficinas.reduce(function (acc, o) { return acc + (o.totalVentasUSD || 0); }, 0);
+    var nombresOficinas = oficinas.map(function (o) { return o.empresaNombre; }).join(", ");
+    content.appendChild(el("div", { class: "hero-stat-grid" }, [
+      el("div", { class: "hero-stat" }, [
+        el("div", { class: "hero-stat-kicker", text: "FTD totales" }),
+        el("div", { class: "hero-stat-value", text: totalFtdsGlobal.toLocaleString("en-US") }),
+        el("div", { class: "hero-stat-caption", text: "Sumando " + nombresOficinas + " este mes" }),
+      ]),
+      el("div", { class: "hero-stat" }, [
+        el("div", { class: "hero-stat-kicker", text: "Total ventas" }),
+        el("div", { class: "hero-stat-value", text: currency.format(totalVentasGlobal) }),
+        el("div", { class: "hero-stat-caption", text: "Sumando " + nombresOficinas + " este mes" }),
+      ]),
+    ]));
 
     var tilesArr = oficinas.map(function (o) {
       return statTile(
