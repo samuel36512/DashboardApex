@@ -4,13 +4,6 @@ import { EMPRESA_ID_ACTUAL } from "./empresaActual";
 
 type Supabase = ReturnType<typeof getSupabase>;
 
-// NOTA MIGRACION: por ahora se sigue usando id=1 como fila unica (todavia
-// no se corrio la migracion que hace empresa_id la clave primaria de esta
-// tabla) - este archivo se actualiza para usar empresa_id en el mismo paso
-// en que se corre esa migracion (ver plan de multi-empresa), no antes,
-// porque hasta ese momento la columna "id" todavia existe y es la clave.
-const PAUTA_ROW_ID = 1;
-
 function periodoActualColombia(): string {
   const ahoraCo = new Date(Date.now() - 5 * 60 * 60 * 1000);
   const anio = ahoraCo.getUTCFullYear();
@@ -26,7 +19,7 @@ interface PautaEstadoRow {
 }
 
 async function leerEstado(supabase: Supabase): Promise<PautaEstadoRow> {
-  const { data } = await supabase.from("pauta_estado").select("*").eq("id", PAUTA_ROW_ID).maybeSingle();
+  const { data } = await supabase.from("pauta_estado").select("*").eq("empresa_id", EMPRESA_ID_ACTUAL).maybeSingle();
   const periodoActual = periodoActualColombia();
   if (!data) {
     return { activa: true, desde: new Date().toISOString(), dias_inactivos_mes: 0, periodo: periodoActual };
@@ -71,7 +64,6 @@ export async function toggleActiva(supabase: Supabase): Promise<{ activa: boolea
 
   const nuevaActiva = !estado.activa;
   const { error } = await supabase.from("pauta_estado").upsert({
-    id: PAUTA_ROW_ID,
     empresa_id: EMPRESA_ID_ACTUAL,
     activa: nuevaActiva,
     desde: ahora.toISOString(),

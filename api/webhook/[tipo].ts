@@ -37,7 +37,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .from("eventos")
     .upsert(
       { contacto_id, agente, tipo, monto: monto ?? null, fecha, empresa_id: EMPRESA_ID_ACTUAL },
-      { onConflict: "contacto_id,tipo" }
+      { onConflict: "empresa_id,contacto_id,tipo" }
     );
 
   if (error) {

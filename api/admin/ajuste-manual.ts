@@ -77,7 +77,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     empresa_id: EMPRESA_ID_ACTUAL,
   }));
 
-  const { error: insertError } = await supabase.from("eventos").upsert(filas, { onConflict: "contacto_id,tipo" });
+  const { error: insertError } = await supabase.from("eventos").upsert(filas, { onConflict: "empresa_id,contacto_id,tipo" });
   if (insertError) {
     return res.status(500).json({ error: "Error guardando el ajuste: " + insertError.message });
   }

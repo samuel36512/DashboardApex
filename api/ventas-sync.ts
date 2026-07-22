@@ -371,7 +371,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       for (let i = 0; i < rowsVenta.length; i += CHUNK) {
         const { error } = await supabase
           .from("eventos")
-          .upsert(rowsVenta.slice(i, i + CHUNK), { onConflict: "contacto_id,tipo" });
+          .upsert(rowsVenta.slice(i, i + CHUNK), { onConflict: "empresa_id,contacto_id,tipo" });
         if (error) throw new Error(`Error guardando ventas: ${error.message}`);
       }
     }

@@ -261,7 +261,7 @@ async function syncAgente(
       rows.push({ contacto_id: c.id, agente: agenteNombre, tipo: "lead", fecha, empresa_id: EMPRESA_ID_ACTUAL });
     }
     if (rows.length > 0) {
-      const { error } = await supabase.from("eventos").upsert(rows, { onConflict: "contacto_id,tipo" });
+      const { error } = await supabase.from("eventos").upsert(rows, { onConflict: "empresa_id,contacto_id,tipo" });
       if (error) throw new Error(`Error guardando datos (${agenteNombre}): ${error.message}`);
       eventosGuardados += rows.length;
     }
@@ -358,7 +358,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       for (let i = 0; i < pipelineRows.length; i += CHUNK) {
         const { error } = await supabase
           .from("eventos")
-          .upsert(pipelineRows.slice(i, i + CHUNK), { onConflict: "contacto_id,tipo" });
+          .upsert(pipelineRows.slice(i, i + CHUNK), { onConflict: "empresa_id,contacto_id,tipo" });
         if (error) throw new Error(`Error guardando registro/ftd: ${error.message}`);
       }
     }
