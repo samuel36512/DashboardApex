@@ -85,6 +85,13 @@ function parseFechaSheet(s: string): string | null {
   return new Date(Date.UTC(Number(m[3]), mes, Number(m[1]), 12, 0, 0)).toISOString();
 }
 
+// Algunas filas del sheet traen el codigo de orden (ORD-AAAAMMDD-XXXXX)
+// metido por error en la columna de producto - se descarta para que caiga
+// en "Sin especificar" en vez de mostrarse como si fuera un producto real.
+function pareceCodigoOrden(s: string): boolean {
+  return /^ord-\d{6,}/i.test(s.trim());
+}
+
 function parsePrecio(s: string): number {
   return Number(String(s).replace(/[^0-9.-]/g, "")) || 0;
 }
@@ -286,7 +293,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const fechaCruda = (fila[0] || "").toString().trim();
       const cliente = (fila[1] || "").toString().trim();
-      const producto = (fila[3] || fila[2] || "").toString().trim();
+      let producto = (fila[3] || fila[2] || "").toString().trim();
+      if (pareceCodigoOrden(producto)) producto = "";
       const precioCrudo = (fila[4] || "").toString().trim();
       const agenteSheet = (fila[6] || "").toString().trim();
       const comisionCruda = (fila[7] || "").toString().trim();
