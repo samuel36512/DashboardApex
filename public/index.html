@@ -436,6 +436,46 @@
   }
   .spotlight-card.warning .spotlight-value { color: var(--danger); }
 
+  /* ---- Hero stat (costo promedio por FTD) ---- */
+  .hero-stat {
+    position: relative;
+    overflow: hidden;
+    border-radius: 18px;
+    padding: 32px 28px;
+    text-align: center;
+    border: 1px solid rgba(220,174,83,0.32);
+    background:
+      radial-gradient(circle at 50% 0%, rgba(220,174,83,0.22), transparent 55%),
+      repeating-linear-gradient(0deg, rgba(220,174,83,0.045) 0px, rgba(220,174,83,0.045) 1px, transparent 1px, transparent 40px),
+      repeating-linear-gradient(90deg, rgba(220,174,83,0.045) 0px, rgba(220,174,83,0.045) 1px, transparent 1px, transparent 40px),
+      linear-gradient(160deg, #171510, #0a0908 70%);
+    box-shadow: 0 0 0 1px rgba(220,174,83,0.05), 0 30px 70px -30px rgba(0,0,0,0.7);
+  }
+  .hero-stat-kicker {
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    margin-bottom: 14px;
+  }
+  .hero-stat-value {
+    font-size: clamp(40px, 7vw, 64px);
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: -0.01em;
+    background: linear-gradient(160deg, #f6ecce, var(--series-1) 70%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    text-shadow: 0 0 46px rgba(220,174,83,0.35);
+  }
+  .hero-stat-caption {
+    margin-top: 14px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+  }
+
   /* ---- Costo por FTD ---- */
   .cost-row {
     display: grid;
@@ -1670,14 +1710,15 @@
       var totalInvertidoCOP = Number(data.totalInvertidoPautaCOP) || 0;
       if (totalFtdsMes > 0) {
         var costoPromedioFtdCOP = totalInvertidoCOP / totalFtdsMes;
-        var promedioGrid = el("div", { class: "spotlight-grid" }, [
-          el("div", { class: "spotlight-card star" }, [
-            el("div", { class: "spotlight-kicker", text: "🎯 Costo promedio por FTD" }),
-            el("div", { class: "spotlight-name", text: currencyCOP.format(costoPromedioFtdCOP) + " / FTD" }),
-            el("div", { class: "spotlight-value", text: currencyCOP.format(totalInvertidoCOP) + " invertidos ÷ " + totalFtdsMes + (totalFtdsMes === 1 ? " FTD" : " FTDs") + " este mes" }),
-          ]),
+        var heroStat = el("div", { class: "hero-stat" }, [
+          el("div", { class: "hero-stat-kicker", text: "🎯 Costo promedio por FTD" }),
+          el("div", { class: "hero-stat-value", text: currencyCOP.format(costoPromedioFtdCOP) }),
+          el("div", {
+            class: "hero-stat-caption",
+            text: currencyCOP.format(totalInvertidoCOP) + " invertidos ÷ " + totalFtdsMes + (totalFtdsMes === 1 ? " FTD" : " FTDs") + " este mes",
+          }),
         ]);
-        content.appendChild(el("section", {}, [promedioGrid]));
+        content.appendChild(el("section", {}, [heroStat]));
       }
     }
 
