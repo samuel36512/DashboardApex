@@ -619,9 +619,24 @@
   }
 
   /* ---- Login ---- */
+  body.login-screen {
+    min-height: 100vh;
+    background:
+      radial-gradient(circle at 18% 15%, rgba(220,174,83,0.16), transparent 45%),
+      radial-gradient(circle at 85% 80%, rgba(220,174,83,0.10), transparent 50%),
+      repeating-linear-gradient(0deg, rgba(220,174,83,0.05) 0px, rgba(220,174,83,0.05) 1px, transparent 1px, transparent 48px),
+      repeating-linear-gradient(90deg, rgba(220,174,83,0.05) 0px, rgba(220,174,83,0.05) 1px, transparent 1px, transparent 48px),
+      linear-gradient(160deg, #100e08 0%, #0a0908 55%, #050504 100%);
+    background-attachment: fixed;
+  }
   .login {
     max-width: 380px;
     margin: 80px auto;
+    position: relative;
+    background: linear-gradient(160deg, rgba(23,21,16,0.86), rgba(10,9,8,0.92));
+    backdrop-filter: blur(6px);
+    border: 1px solid rgba(220,174,83,0.28);
+    box-shadow: 0 0 0 1px rgba(220,174,83,0.06), 0 24px 60px -20px rgba(0,0,0,0.7), 0 0 40px -12px rgba(220,174,83,0.25);
   }
   .login h2 { font-size: 17px; margin: 0 0 6px; }
   .login p { font-size: 13px; color: var(--text-secondary); line-height: 1.5; margin: 0 0 4px; }
@@ -978,11 +993,12 @@
   }
 
   function renderLogin(errorMsg) {
+    document.body.classList.add("login-screen");
     app.innerHTML = "";
     var panel = el("div", { class: "card login" }, [
       el("div", { class: "brand" }, [
         el("span", { class: "brand-mark" }),
-        el("span", { class: "brand-name" }, [el("b", { text: "Dashboard" })]),
+        el("span", { class: "brand-name" }, [document.createTextNode("NEXUS "), el("b", { text: "DASHBOARD" })]),
       ]),
       el("h2", { text: "Conversión de Ventas" }),
       el("p", { text: "Ingresá con el email y la contraseña que te dieron." }),
@@ -1073,6 +1089,7 @@
   ];
 
   function renderWelcome() {
+    document.body.classList.remove("login-screen");
     currentView = "welcome";
     adminPanelOpen = false;
     ajustePanelOpen = false;
@@ -1176,6 +1193,7 @@
   };
 
   function renderShell() {
+    document.body.classList.remove("login-screen");
     app.innerHTML = "";
 
     var header = el("header", {}, [
