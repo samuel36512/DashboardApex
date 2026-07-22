@@ -101,10 +101,18 @@ create table if not exists empresas (
   tasa_comision_director_ventas numeric not null default 0.15,
   comision_por_ftd_usd numeric not null default 8,
   meta_ventas_usd numeric not null default 2400,
-  zona_horaria_offset_horas numeric not null default -5
+  zona_horaria_offset_horas numeric not null default -5,
+
+  -- Si un director ya conoce su costo por lead real (en vez de derivarlo de
+  -- una tarifa diaria de pauta por tier x dias activos, como APEX
+  -- PRINCIPAL), este valor pisa el calculo derivado en /metrics y
+  -- /pago-director. Nulo = se sigue derivando como siempre.
+  costo_por_lead_fijo_cop numeric
 );
 create unique index if not exists uq_empresas_webhook_secret on empresas (webhook_secret);
 alter table empresas enable row level security;
+-- La tabla empresas ya existia en vivo antes de agregar este campo:
+alter table empresas add column if not exists costo_por_lead_fijo_cop numeric;
 
 -- empresa_id en cada tabla existente - nullable por ahora (se llena en el
 -- paso de migracion, recien despues se pasa a NOT NULL).

@@ -117,7 +117,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   });
   const totalInvertidoCOP = agentesBase.reduce((acc, a) => acc + (a.gastoPautaCOP || 0), 0);
   const totalLeadsMes = agentesBase.reduce((acc, a) => acc + (a.leads || 0), 0);
-  const costoPorLeadCOP = totalLeadsMes > 0 ? totalInvertidoCOP / totalLeadsMes : null;
+  const costoPorLeadCOP =
+    auth.ctx.empresa.costoPorLeadFijoCOP ?? (totalLeadsMes > 0 ? totalInvertidoCOP / totalLeadsMes : null);
 
   const agentesArr = agentesBase.map((a) => {
     const gastoRealCOP = costoPorLeadCOP !== null ? Math.round(costoPorLeadCOP * a.leads) : null;

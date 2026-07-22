@@ -246,7 +246,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // FTD da el "costo por FTD real" que pidio el director (ej. Luna Sandoval,
   // 140 leads x $7.497 = $1.049.580 de gasto real).
   const totalInvertidoCOP = agentesBase.reduce((acc, a) => acc + (a.gastoPautaCOP || 0), 0);
-  const costoPorLeadCOP = totalLeadsMes > 0 ? totalInvertidoCOP / totalLeadsMes : null;
+  const costoPorLeadCOP =
+    auth.ctx.empresa.costoPorLeadFijoCOP ?? (totalLeadsMes > 0 ? totalInvertidoCOP / totalLeadsMes : null);
 
   const agentes = agentesBase
     .map((a) => {

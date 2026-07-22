@@ -15,6 +15,7 @@ export interface EmpresaRates {
   tasaComisionDirectorVentas: number;
   comisionPorFtdUSD: number;
   metaVentasUSD: number;
+  costoPorLeadFijoCOP: number | null;
 }
 
 export interface AuthContext {
@@ -46,7 +47,7 @@ export async function requireAuth(
   const { data: perfil, error: perfilError } = await supabase
     .from("perfiles")
     .select(
-      "rol, empresa_id, agente_id, agentes(nombre), empresas(tasa_pauta_ejecutivo_cop, tasa_pauta_junior_cop, comision_director_base_usd, comision_director_alta_usd, umbral_ftd_tasa_alta, tasa_comision_director_ventas, comision_por_ftd_usd, meta_ventas_usd)"
+      "rol, empresa_id, agente_id, agentes(nombre), empresas(tasa_pauta_ejecutivo_cop, tasa_pauta_junior_cop, comision_director_base_usd, comision_director_alta_usd, umbral_ftd_tasa_alta, tasa_comision_director_ventas, comision_por_ftd_usd, meta_ventas_usd, costo_por_lead_fijo_cop)"
     )
     .eq("id", userData.user.id)
     .maybeSingle();
@@ -83,6 +84,10 @@ export async function requireAuth(
         tasaComisionDirectorVentas: Number(empresaRow.tasa_comision_director_ventas),
         comisionPorFtdUSD: Number(empresaRow.comision_por_ftd_usd),
         metaVentasUSD: Number(empresaRow.meta_ventas_usd),
+        costoPorLeadFijoCOP:
+          empresaRow.costo_por_lead_fijo_cop === null || empresaRow.costo_por_lead_fijo_cop === undefined
+            ? null
+            : Number(empresaRow.costo_por_lead_fijo_cop),
       },
     },
   };
