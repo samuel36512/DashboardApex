@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import crypto from "node:crypto";
 import { getSupabase } from "../_lib/supabase";
-import { getAccessToken, requireDirector } from "../_lib/auth";
+import { getAccessToken, getEmpresaOverride, requireDirector } from "../_lib/auth";
 
 function randomPassword(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
@@ -17,7 +17,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const supabase = getSupabase();
-  const auth = await requireDirector(supabase, getAccessToken(req));
+  const auth = await requireDirector(supabase, getAccessToken(req), { empresaOverride: getEmpresaOverride(req) });
   if (!auth.ok) {
     return res.status(auth.status).json({ error: auth.error });
   }

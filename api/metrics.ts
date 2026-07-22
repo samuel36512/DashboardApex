@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getSupabase } from "./_lib/supabase";
 import { tasaDiariaCOP } from "./_lib/agentTier";
 import { getDiasActivosPautaMes } from "./_lib/pautaEstado";
-import { getAccessToken, requireAuth } from "./_lib/auth";
+import { getAccessToken, getEmpresaOverride, requireAuth } from "./_lib/auth";
 
 interface AgentAgg {
   leads: number;
@@ -18,7 +18,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const supabase = getSupabase();
-  const auth = await requireAuth(supabase, getAccessToken(req));
+  const auth = await requireAuth(supabase, getAccessToken(req), { empresaOverride: getEmpresaOverride(req) });
   if (!auth.ok) {
     return res.status(auth.status).json({ error: auth.error });
   }

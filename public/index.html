@@ -991,6 +991,8 @@
   var currentEmail = null;
   var currentRol = null;
   var currentEmpresaNombre = "";
+  var currentEmpresaOverride = null;
+  var currentEmpresaOverrideNombre = "";
   var currentView = "welcome";
   var adminPanelOpen = false;
   var ajustePanelOpen = false;
@@ -1018,6 +1020,22 @@
   var currency = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
   var currencyPrecise = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
   var currencyCOP = new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 });
+
+  // El superadmin viendo una oficina puntual debe ver exactamente lo mismo
+  // que veria su director (paneles de admin, filtros, "top" del ranking) -
+  // su rol real (para saber que puede cruzar oficinas) sigue siendo
+  // "superadmin", pero para decidir que MOSTRAR dentro de una oficina se
+  // trata igual que "director".
+  function esRolDirector(rol) {
+    return rol === "director" || rol === "superadmin";
+  }
+
+  // Sufijo "?empresa=ID" (o "" si no aplica) para que las llamadas del
+  // superadmin a endpoints de admin apunten a la oficina que tiene
+  // seleccionada - no tiene efecto para ningun otro rol.
+  function empresaQs() {
+    return currentEmpresaOverride ? "?empresa=" + encodeURIComponent(currentEmpresaOverride) : "";
+  }
 
   function el(tag, attrs, children) {
     var node = document.createElement(tag);
@@ -1141,7 +1159,7 @@
       el("p", { class: "welcome-sub", text: currentEmail || "" }),
     ]);
 
-    var items = currentRol === "director" ? NAV_ITEMS : AGENT_NAV_ITEMS;
+    var items = esRolDirector(currentRol) ? NAV_ITEMS : AGENT_NAV_ITEMS;
     var nav = el("div", { class: "welcome-nav" });
     items.forEach(function (item) {
       var card = el("button", { class: "nav-card" }, [
@@ -1154,6 +1172,12 @@
     });
     wrap.appendChild(nav);
 
+    if (currentRol === "superadmin") {
+      var cambiarBtn = el("button", { class: "welcome-logout", text: "← Cambiar de oficina" });
+      cambiarBtn.addEventListener("click", function () { loadSuperadminPicker(); });
+      wrap.appendChild(cambiarBtn);
+    }
+
     var logoutBtn = el("button", { class: "welcome-logout", text: "Salir" });
     logoutBtn.addEventListener("click", function () {
       supabaseClient.auth.signOut().then(boot);
@@ -1161,6 +1185,178 @@
     wrap.appendChild(logoutBtn);
 
     app.appendChild(wrap);
+  }
+
+  // Pantalla de entrada del superadmin: elegir una de las oficinas (entra
+  // al mismo flujo de siempre, NAV_ITEMS incluido) o la vista global.
+  function loadSuperadminPicker() {
+    currentRol = "superadmin";
+    currentEmpresaOverride = null;
+    currentEmpresaOverrideNombre = "";
+    currentEmpresaNombre = "";
+    currentView = "welcome";
+    adminPanelOpen = false;
+    ajustePanelOpen = false;
+    app.innerHTML = "";
+    app.appendChild(el("div", { class: "state" }, [el("div", { class: "big", text: "Cargando oficinas…" })]));
+    fetch("/api/admin/empresas", { headers: { Authorization: "Bearer " + currentAccessToken } })
+      .then(function (res) {
+        return res.json().then(function (body) { return { status: res.status, body: body }; });
+      })
+      .then(function (r) {
+        if (r.status !== 200) throw new Error(r.body.error || "No se pudo cargar la lista de oficinas");
+        renderSuperadminPicker(r.body.empresas || []);
+      })
+      .catch(function (err) {
+        renderLogin(err.message || "No se pudo cargar tu cuenta.");
+      });
+  }
+
+  function renderSuperadminPicker(empresas) {
+    document.body.classList.remove("login-screen");
+    app.innerHTML = "";
+    var wrap = el("div", { class: "welcome-wrap" }, [
+      el("div", { class: "welcome-hero" }, [el("span", { class: "brand-mark" })]),
+      el("div", { class: "welcome-kicker" }, [el("b", { text: "NEXUS DASHBOARD" })]),
+      el("h1", { class: "welcome-title", text: "Panel de administración" }),
+      el("p", { class: "welcome-sub", text: currentEmail || "" }),
+    ]);
+
+    var nav = el("div", { class: "welcome-nav" });
+    empresas.forEach(function (emp) {
+      var card = el("button", { class: "nav-card" }, [
+        el("div", { class: "nav-icon" }),
+        el("div", { class: "nav-label", text: emp.nombre }),
+        el("div", { class: "nav-desc", text: "Ver el dashboard completo de esta oficina." }),
+      ]);
+      card.addEventListener("click", function () {
+        currentEmpresaOverride = emp.id;
+        currentEmpresaOverrideNombre = emp.nombre;
+        currentEmpresaNombre = emp.nombre;
+        renderWelcome();
+      });
+      nav.appendChild(card);
+    });
+    var globalCard = el("button", { class: "nav-card" }, [
+      el("div", { class: "nav-icon" }),
+      el("div", { class: "nav-label", text: "Vista global" }),
+      el("div", { class: "nav-desc", text: "Los mejores agentes y los totales de las 3 oficinas juntas." }),
+    ]);
+    globalCard.addEventListener("click", function () { enterGlobalView(); });
+    nav.appendChild(globalCard);
+    wrap.appendChild(nav);
+
+    var logoutBtn = el("button", { class: "welcome-logout", text: "Salir" });
+    logoutBtn.addEventListener("click", function () {
+      supabaseClient.auth.signOut().then(boot);
+    });
+    wrap.appendChild(logoutBtn);
+
+    app.appendChild(wrap);
+  }
+
+  // "Inicio" vuelve a la oficina que se esta viendo si hay una elegida; si
+  // el superadmin todavia no eligio ninguna (ej. viene de Vista global),
+  // vuelve al selector en vez de intentar mostrar una oficina inexistente.
+  function goHome() {
+    if (currentRol === "superadmin" && !currentEmpresaOverride) {
+      loadSuperadminPicker();
+    } else {
+      renderWelcome();
+    }
+  }
+
+  function enterGlobalView() {
+    currentView = "global";
+    adminPanelOpen = false;
+    ajustePanelOpen = false;
+    renderShell();
+    renderLoading();
+    fetch("/api/admin/global", { headers: { Authorization: "Bearer " + currentAccessToken } })
+      .then(function (res) {
+        return res.json().then(function (body) { return { status: res.status, body: body }; });
+      })
+      .then(function (r) {
+        if (r.status !== 200) throw new Error(r.body.error || "No se pudo cargar la vista global");
+        renderGlobalView(r.body);
+      })
+      .catch(function (err) {
+        renderError(err.message || "No se pudo cargar la vista global.");
+      });
+  }
+
+  function renderGlobalView(data) {
+    var content = el("div");
+    var oficinas = data.oficinas || [];
+    var agentes = (data.agentes || []).slice();
+
+    var tilesArr = oficinas.map(function (o) {
+      return statTile(
+        o.empresaNombre,
+        (o.totalFtds || 0).toLocaleString("en-US") + " FTD",
+        currency.format(o.totalVentasUSD || 0) + " en ventas · " + (o.totalLeadsMes || 0).toLocaleString("en-US") + " leads"
+      );
+    });
+    content.appendChild(el("div", { class: "tiles" }, tilesArr));
+
+    var porFtd = agentes.slice().sort(function (a, b) { return (b.ftds || 0) - (a.ftds || 0); }).slice(0, 20);
+    var rankFtdCard = el("div", { class: "card" });
+    rankFtdCard.appendChild(el("div", { class: "section-title", text: "Mejores agentes por FTD (las 3 oficinas)" }));
+    porFtd.forEach(function (a, i) {
+      rankFtdCard.appendChild(el("div", { class: "rank-row" + (i === 0 ? " top" : "") }, [
+        el("div", { class: "rank-num", text: String(i + 1) }),
+        el("div", {}, [
+          el("div", { class: "agente-name", text: a.agente, title: a.agente }),
+          el("div", { class: "cost-tier", text: a.empresaNombre }),
+        ]),
+        el("div", { class: "rank-ftd" }, [
+          document.createTextNode(String(a.ftds || 0)),
+          el("small", { text: "FTD" }),
+        ]),
+      ]));
+    });
+    content.appendChild(el("section", {}, [rankFtdCard]));
+
+    var porVentas = agentes.slice().sort(function (a, b) { return (b.ventasUSD || 0) - (a.ventasUSD || 0); }).slice(0, 20);
+    var rankVentasCard = el("div", { class: "card" });
+    rankVentasCard.appendChild(el("div", { class: "section-title", text: "Mejores agentes por ventas (las 3 oficinas)" }));
+    porVentas.forEach(function (a, i) {
+      rankVentasCard.appendChild(el("div", { class: "rank-row" + (i === 0 ? " top" : "") }, [
+        el("div", { class: "rank-num", text: String(i + 1) }),
+        el("div", {}, [
+          el("div", { class: "agente-name", text: a.agente, title: a.agente }),
+          el("div", { class: "cost-tier", text: a.empresaNombre }),
+        ]),
+        el("div", { class: "rank-ftd" }, [
+          document.createTextNode(currency.format(a.ventasUSD || 0)),
+        ]),
+      ]));
+    });
+    content.appendChild(el("section", {}, [rankVentasCard]));
+
+    var conCosto = agentes.filter(function (a) { return a.costoPorFtdRealCOP !== null && a.costoPorFtdRealCOP !== undefined; });
+    if (conCosto.length > 0) {
+      var porCosto = conCosto.slice().sort(function (a, b) { return a.costoPorFtdRealCOP - b.costoPorFtdRealCOP; }).slice(0, 20);
+      var rankCostoCard = el("div", { class: "card" });
+      rankCostoCard.appendChild(el("div", { class: "section-title", text: "Mejor costo por FTD (las 3 oficinas)" }));
+      porCosto.forEach(function (a, i) {
+        rankCostoCard.appendChild(el("div", { class: "rank-row" + (i === 0 ? " top" : "") }, [
+          el("div", { class: "rank-num", text: String(i + 1) }),
+          el("div", {}, [
+            el("div", { class: "agente-name", text: a.agente, title: a.agente }),
+            el("div", { class: "cost-tier", text: a.empresaNombre }),
+          ]),
+          el("div", { class: "rank-ftd" }, [
+            document.createTextNode(currencyCOP.format(a.costoPorFtdRealCOP)),
+          ]),
+        ]));
+      });
+      content.appendChild(el("section", {}, [rankCostoCard]));
+    }
+
+    renderContentState(content);
+    document.getElementById("updated-label").textContent =
+      "Actualizado " + new Date(data.actualizado || Date.now()).toLocaleTimeString("es-419", { hour: "2-digit", minute: "2-digit" });
   }
 
   function enterView(view, presetId) {
@@ -1230,6 +1426,7 @@
     "ventas-equipo": "Ventas del equipo",
     "pago-director": "Pago de directores",
     "mi-ganancia": "Mi ganancia",
+    global: "Vista global",
   };
 
   function renderShell() {
@@ -1247,6 +1444,7 @@
       el("div", { class: "toolbar" }, [
         el("span", { class: "whoami", text: currentEmail || "" }),
         el("span", { class: "updated", id: "updated-label", text: "" }),
+        currentRol === "superadmin" ? el("button", { class: "btn", id: "cambiar-oficina-btn", text: "Cambiar de oficina" }) : null,
         el("button", { class: "btn", id: "home-btn", text: "Inicio" }),
         el("button", { class: "btn", id: "refresh-btn", text: "Actualizar" }),
         el("button", { class: "btn", id: "logout-btn", text: "Salir" }),
@@ -1303,10 +1501,17 @@
     ]));
 
     document.getElementById("home-btn").addEventListener("click", function () {
-      renderWelcome();
+      goHome();
     });
+    var cambiarOficinaBtn = document.getElementById("cambiar-oficina-btn");
+    if (cambiarOficinaBtn) {
+      cambiarOficinaBtn.addEventListener("click", function () {
+        loadSuperadminPicker();
+      });
+    }
     document.getElementById("refresh-btn").addEventListener("click", function () {
-      loadMetrics(true, currentAccessToken);
+      if (currentView === "global") enterGlobalView();
+      else loadMetrics(true, currentAccessToken);
     });
     document.getElementById("logout-btn").addEventListener("click", function () {
       supabaseClient.auth.signOut().then(boot);
@@ -1341,7 +1546,7 @@
     var header = document.querySelector("header");
     header.insertAdjacentElement("afterend", panel);
 
-    fetch("/api/admin/agentes", { headers: { Authorization: "Bearer " + currentAccessToken } })
+    fetch("/api/admin/agentes" + empresaQs(), { headers: { Authorization: "Bearer " + currentAccessToken } })
       .then(function (res) {
         return res.json().then(function (body) { return { status: res.status, body: body }; });
       })
@@ -1383,7 +1588,7 @@
         }
         btn.disabled = true;
         btn.textContent = "Creando…";
-        fetch("/api/admin/crear-login-agente", {
+        fetch("/api/admin/crear-login-agente" + empresaQs(), {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: "Bearer " + currentAccessToken },
           body: JSON.stringify({ agenteId: a.id, email: email }),
@@ -1445,7 +1650,7 @@
     var header = document.querySelector("header");
     header.insertAdjacentElement("afterend", panel);
 
-    fetch("/api/admin/agentes", { headers: { Authorization: "Bearer " + currentAccessToken } })
+    fetch("/api/admin/agentes" + empresaQs(), { headers: { Authorization: "Bearer " + currentAccessToken } })
       .then(function (res) {
         return res.json().then(function (body) { return { status: res.status, body: body }; });
       })
@@ -1510,7 +1715,7 @@
       }
       btn.disabled = true;
       btn.textContent = modo === "restar" ? "Restando…" : "Agregando…";
-      fetch("/api/admin/ajuste-manual", {
+      fetch("/api/admin/ajuste-manual" + empresaQs(), {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: "Bearer " + currentAccessToken },
         body: JSON.stringify({
@@ -1582,7 +1787,7 @@
   }
 
   function renderData(data) {
-    if (data.rol === "director") { ensureAdminButton(); ensureAjusteButton(); }
+    if (esRolDirector(data.rol)) { ensureAdminButton(); ensureAjusteButton(); }
     var meta = Number(data.metaVentasUSD) || 2400;
     var agentes = (data.agentes || []).slice().sort(function (a, b) { return b.ventasUSD - a.ventasUSD; });
 
@@ -1658,7 +1863,7 @@
     tableCard.appendChild(table);
     content.appendChild(el("section", {}, [tableCard]));
 
-    if (data.rol === "director") {
+    if (esRolDirector(data.rol)) {
       var pautaActiva = data.pautaActiva !== false;
       var diasActivosTxt = (Number(data.diasActivosPauta) || 0).toLocaleString("es-CO", { maximumFractionDigits: 2 });
       var diaDelMesTxt = data.diaDelMesPauta != null ? data.diaDelMesPauta : "?";
@@ -1671,7 +1876,7 @@
       });
       pautaBtn.addEventListener("click", function () {
         pautaBtn.disabled = true;
-        fetch("/pauta-estado", { method: "POST", headers: { Authorization: "Bearer " + currentAccessToken } })
+        fetch("/pauta-estado" + empresaQs(), { method: "POST", headers: { Authorization: "Bearer " + currentAccessToken } })
           .then(function (r) { return r.json(); })
           .then(function () { loadMetrics(true, currentAccessToken); })
           .catch(function () { pautaBtn.disabled = false; });
@@ -1738,7 +1943,7 @@
   }
 
   function buildRankingCard(data) {
-    var esDirector = data.rol === "director";
+    var esDirector = esRolDirector(data.rol);
     var porFtd = (data.agentes || []).slice().sort(function (a, b) { return (b.ftds || 0) - (a.ftds || 0); });
     var rankCard = el("div", { class: "card" });
     rankCard.appendChild(el("div", { class: "section-title", text: "Ranking de FTD" }));
@@ -1765,7 +1970,7 @@
   }
 
   function buildPagosRankingCard(data) {
-    var esDirector = data.rol === "director";
+    var esDirector = esRolDirector(data.rol);
     var porPago = (data.agentes || []).slice().sort(function (a, b) { return (b.gananciaEstimadaUSD || 0) - (a.gananciaEstimadaUSD || 0); });
     var rankCard = el("div", { class: "card" });
     rankCard.appendChild(el("div", { class: "section-title", text: "Ranking mejores pagos" }));
@@ -1900,6 +2105,7 @@
     }
     var qs = "?desde=" + encodeURIComponent(localDayStartIso(ventasDetalleDesde)) + "&hasta=" + encodeURIComponent(localDayEndIso(ventasDetalleHasta));
     if (ventasDetalleAgente) qs += "&agente=" + encodeURIComponent(ventasDetalleAgente);
+    if (currentEmpresaOverride) qs += "&empresa=" + encodeURIComponent(currentEmpresaOverride);
 
     fetch("/ventas-detalle" + qs, { headers: { Authorization: "Bearer " + currentAccessToken } })
       .then(function (res) {
@@ -1925,7 +2131,7 @@
     if (!container) return;
     container.innerHTML = "";
 
-    if (currentRol === "director") {
+    if (esRolDirector(currentRol)) {
       var agentesSel = data.agentesActivos || [];
       var select = el("select", { class: "agente-select" }, [el("option", { value: "", text: "Todos los agentes" })]);
       agentesSel.forEach(function (a) {
@@ -2394,7 +2600,7 @@
 
     var content = el("div");
 
-    if (currentRol === "director") {
+    if (esRolDirector(currentRol)) {
       var agentes = data.agentesActivos || [];
       var select = el("select", { class: "agente-select" }, [el("option", { value: "", text: "Todos los agentes" })]);
       agentes.forEach(function (a) {
@@ -2457,6 +2663,12 @@
       var inicioMesStr = fmtDate(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
       qs = "?desde=" + encodeURIComponent(localDayStartIso(inicioMesStr)) + "&hasta=" + encodeURIComponent(localDayEndIso(hoyStr));
     }
+    // El superadmin viendo una oficina puntual manda que empresa mirar -
+    // para todos los demas roles esto no aplica (currentEmpresaOverride
+    // nunca se fija) y no cambia nada de lo de siempre.
+    if (currentEmpresaOverride) {
+      qs += (qs ? "&" : "?") + "empresa=" + encodeURIComponent(currentEmpresaOverride);
+    }
 
     fetch(endpoint + qs, { headers: { Authorization: "Bearer " + accessToken } })
       .then(function (res) {
@@ -2499,15 +2711,22 @@
       currentAccessToken = session.access_token;
       fetch("/metrics", { headers: { Authorization: "Bearer " + session.access_token } })
         .then(function (res) {
+          // 400 antes de cualquier otro chequeo solo puede ser el "elegi una
+          // empresa" que devuelve requireAuth para superadmin (el unico otro
+          // 400 de este endpoint es de validacion de fechas, y esa nunca pasa
+          // sin auth exitosa primero) - se resuelve con el selector de
+          // oficinas en vez de tratarlo como error.
+          if (res.status === 400) {
+            return loadSuperadminPicker();
+          }
           if (res.status === 401) throw new Error("Tu sesión venció, volvé a iniciar sesión.");
           if (res.status === 403) throw new Error("Tu cuenta todavía no tiene acceso configurado. Pedile al director que te habilite.");
           if (!res.ok) throw new Error("El servidor respondió con un error (código " + res.status + ")");
-          return res.json();
-        })
-        .then(function (data) {
-          currentRol = data.rol;
-          currentEmpresaNombre = data.empresaNombre || "";
-          renderWelcome();
+          return res.json().then(function (data) {
+            currentRol = data.rol;
+            currentEmpresaNombre = data.empresaNombre || "";
+            renderWelcome();
+          });
         })
         .catch(function (err) {
           renderLogin(err.message || "No se pudo cargar tu cuenta.");
@@ -2515,7 +2734,8 @@
       refreshTimer = setInterval(function () {
         supabaseClient.auth.getSession().then(function (r) {
           var s = r.data && r.data.session;
-          if (s && currentView !== "welcome") loadMetrics(false, s.access_token);
+          if (s && currentView === "global") enterGlobalView();
+          else if (s && currentView !== "welcome") loadMetrics(false, s.access_token);
         });
       }, REFRESH_MS);
     });

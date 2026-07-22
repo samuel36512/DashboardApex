@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getSupabase } from "./_lib/supabase";
-import { getAccessToken, requireAuth } from "./_lib/auth";
+import { getAccessToken, getEmpresaOverride, requireAuth } from "./_lib/auth";
 
 const LIMITE = 500;
 
@@ -10,7 +10,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const supabase = getSupabase();
-  const auth = await requireAuth(supabase, getAccessToken(req));
+  const auth = await requireAuth(supabase, getAccessToken(req), { empresaOverride: getEmpresaOverride(req) });
   if (!auth.ok) {
     return res.status(auth.status).json({ error: auth.error });
   }
