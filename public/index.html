@@ -1556,12 +1556,20 @@
 
     var content = el("div");
 
-    var tiles = el("div", { class: "tiles" }, [
+    var tilesArr = [
       statTile("Leads", totals.leads.toLocaleString("en-US"), null),
       statTile("Registrados en EXOPTION", totals.registros.toLocaleString("en-US"), totals.leads ? pct(totals.registros / totals.leads * 100) + " de los leads" : null),
       statTile("FTDs", totals.ftds.toLocaleString("en-US"), totals.leads ? pct(totals.ftds / totals.leads * 100) + " de los leads" : null),
       statTile("Ventas de membresía", currency.format(totals.ventasUSD), agentes.length ? "Meta del equipo: " + currency.format(meta * agentes.length) : null),
-    ]);
+    ];
+    if (data.costoPorLeadCOP !== null && data.costoPorLeadCOP !== undefined) {
+      tilesArr.push(statTile(
+        "Costo promedio de la oficina",
+        currencyCOP.format(data.costoPorLeadCOP),
+        (data.totalLeadsMes || 0).toLocaleString("en-US") + " leads este mes · por lead"
+      ));
+    }
+    var tiles = el("div", { class: "tiles" }, tilesArr);
     content.appendChild(tiles);
 
     if (agentes.length === 0) {
