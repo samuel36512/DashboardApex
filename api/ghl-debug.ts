@@ -332,6 +332,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   }
 
+  // Lista el equipo (usuarios) del location - sirve para sacar el
+  // ghl_user_id de cada agente al dar de alta una empresa nueva, sin tener
+  // que buscarlo a mano uno por uno en la interfaz de GHL.
+  if (req.query.users === "1") {
+    const r = await fetch(`${GHL_BASE}/users/?locationId=${locationId}`, { headers });
+    if (!r.ok) return res.status(502).json({ error: `GHL /users respondio ${r.status}` });
+    const data: any = await r.json();
+    const users = Array.isArray(data?.users) ? data.users : [];
+    return res.status(200).json({
+      users: users.map((u: any) => ({
+        id: u.id,
+        nombre: u.name || `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim(),
+        email: u.email,
+      })),
+    });
+  }
+
   const agenteQuery = typeof req.query.agente === "string" ? req.query.agente.trim() : "";
   if (agenteQuery) {
     if (!empresa.ghlPipelineId || !empresa.ghlRegistradoStageId || !empresa.ghlFtdStageId) {
