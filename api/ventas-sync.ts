@@ -96,9 +96,14 @@ function parsePrecio(s: string): number {
   return Number(String(s).replace(/[^0-9.-]/g, "")) || 0;
 }
 
-function idVenta(orden: string, cliente: string, fecha: string, producto: string, precio: string): string {
+// El producto NO participa de la identidad de la venta - si el texto de esa
+// columna cambia entre sincronizaciones (typo corregido, o el codigo de
+// orden que a veces queda mal puesto ahi y despues se limpia), la MISMA
+// venta real no debe generar un ID ni una firma distintos. cliente+fecha+
+// precio (+orden si existe) ya es suficientemente especifico.
+function idVenta(orden: string, cliente: string, fecha: string, precio: string): string {
   if (orden) return `venta-${orden}`;
-  const base = `${cliente}|${fecha}|${producto}|${precio}`;
+  const base = `${cliente}|${fecha}|${precio}`;
   return `venta-${crypto.createHash("sha1").update(base).digest("hex").slice(0, 16)}`;
 }
 
@@ -249,7 +254,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // del lado recien calculado, la firma nunca coincide con nada y esta
         // barrera queda sin efecto silenciosamente (que es lo que estaba
         // pasando).
-        const firma = `${row.agente}|${row.producto}|${Number(row.monto)}|${new Date(row.fecha).toISOString()}|${correo.toLowerCase()}`;
+        const firma = `${row.agente}|${Number(row.monto)}|${new Date(row.fecha).toISOString()}|${correo.toLowerCase()}`;
         firmasExistentes.set(firma, row.contacto_id);
       }
       if (!page || page.length < PAGE_FIRMAS) break;
@@ -344,16 +349,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // el precio ya parseado a numero en vez del texto con formato de
       // moneda. Texto crudo inestable = un ID nuevo en cada sincronizacion =
       // la misma venta duplicada sin parar.
-      const contactoId = idVenta(orden, clienteId, fechaIso, producto, String(montoParsed));
+      const contactoId = idVenta(orden, clienteId, fechaIso, String(montoParsed));
 
       // La barrera por firma de negocio aplica SIEMPRE, tenga o no numero de
       // orden - la hoja es compartida por toda la empresa y crece todo el
       // tiempo, asi que el numero de orden de una fila puede correrse con el
-      // tiempo (no es un ID fijo). Riesgo aceptado: si el mismo cliente
-      // compra el MISMO producto, al mismo precio, el mismo dia, dos veces
-      // de verdad, la segunda se salta - un caso raro, preferible a seguir
-      // duplicando ventas reales.
-      const firma = `${agente}|${productoFinal}|${montoParsed}|${fechaIso}|${clienteId.toLowerCase()}`;
+      // tiempo (no es un ID fijo). El producto NO participa de la firma (ver
+      // idVenta) - si participara, corregir un typo en esa columna o el
+      // codigo de orden colandose ahi por error (ya paso) generaria un ID Y
+      // una firma nuevos, duplicando una venta real. Riesgo aceptado: si el
+      // mismo cliente compra al mismo precio el mismo dia dos veces de
+      // verdad (aunque sean productos distintos), la segunda se salta - un
+      // caso raro, preferible a seguir duplicando ventas reales.
+      const firma = `${agente}|${montoParsed}|${fechaIso}|${clienteId.toLowerCase()}`;
       const idExistente = firmasExistentes.get(firma);
       if (idExistente && idExistente !== contactoId) {
         // Ya hay una venta identica guardada con OTRO id (el calculo del ID
