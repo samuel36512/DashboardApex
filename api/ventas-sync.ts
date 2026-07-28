@@ -292,6 +292,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let ultimaFechaValida = "";
     let sinFecha = 0;
 
+    // Oficinas como LEGENDARY no tienen roster propio de agentes - se
+    // acepta cualquier fila cuyo DIRECTOR (columna I) coincida con el
+    // correo configurado, usando el nombre de la columna AGENTE tal cual
+    // viene, en vez de intentar reconocerlo contra un roster/alias.
+    const directorFiltroEmail = empresa.ventasDirectorEmail ? empresa.ventasDirectorEmail.toLowerCase() : null;
+
     for (let i = headerIdx + 2; i < filas.length; i++) {
       const fila = filas[i];
       if (!fila || fila.every((c) => !c)) continue; // fila vacia
@@ -326,19 +332,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         sinFecha++;
         // Si la fila SI es de uno de nuestros agentes, vale la pena saberlo -
         // significa que se esta perdiendo una venta real por falta de fecha,
-        // no solo filas de gente ajena al equipo.
-        const agenteConocido = mapearAgente(agenteSheet, agentesActivos, emailToAgente, aliasToAgente);
-        if (agenteConocido) {
-          sinFechaConocidos.push({ agente: agenteConocido, cliente, producto, fechaCruda });
+        // no solo filas de gente ajena al equipo. No aplica en modo
+        // filtro-por-director (no hay roster contra el cual reconocer).
+        if (!directorFiltroEmail) {
+          const agenteConocido = mapearAgente(agenteSheet, agentesActivos, emailToAgente, aliasToAgente);
+          if (agenteConocido) {
+            sinFechaConocidos.push({ agente: agenteConocido, cliente, producto, fechaCruda });
+          }
         }
         continue;
       }
 
-      const agente = mapearAgente(agenteSheet, agentesActivos, emailToAgente, aliasToAgente);
-      if (!agente) {
-        noReconocidos.add(agenteSheet);
-        continue;
+      let agente: string | null;
+      if (directorFiltroEmail) {
+        const directorSheet = (fila[8] || "").toString().trim();
+        const directorEmail =
+          directorSheet.split("\n").map((s: string) => s.trim()).filter(Boolean).pop()?.toLowerCase() || "";
+        if (directorEmail !== directorFiltroEmail) continue; // fila de otra oficina, se ignora sin mas
+        agente = (agenteSheet.split("\n")[0] || agenteSheet).trim();
+      } else {
+        agente = mapearAgente(agenteSheet, agentesActivos, emailToAgente, aliasToAgente);
+        if (!agente) {
+          noReconocidos.add(agenteSheet);
+          continue;
+        }
       }
+      if (!agente) continue;
 
       const montoParsed = parsePrecio(precioCrudo);
       const productoFinal = producto || "Sin especificar";

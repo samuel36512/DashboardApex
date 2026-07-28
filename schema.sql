@@ -107,7 +107,14 @@ create table if not exists empresas (
   -- una tarifa diaria de pauta por tier x dias activos, como APEX
   -- PRINCIPAL), este valor pisa el calculo derivado en /metrics y
   -- /pago-director. Nulo = se sigue derivando como siempre.
-  costo_por_lead_fijo_cop numeric
+  costo_por_lead_fijo_cop numeric,
+
+  -- Oficinas sin GHL propio y sin roster de agentes (ej. LEGENDARY): en vez
+  -- de reconocer agentes uno por uno, ventas-sync acepta cualquier fila del
+  -- sheet compartido cuyo DIRECTOR (columna I) coincida con este correo, y
+  -- usa el nombre de la columna AGENTE tal cual viene. Nulo = comportamiento
+  -- normal (roster + alias por agente).
+  ventas_director_email text
 );
 create unique index if not exists uq_empresas_webhook_secret on empresas (webhook_secret);
 alter table empresas enable row level security;

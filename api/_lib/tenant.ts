@@ -12,6 +12,12 @@ export interface EmpresaConfig {
   ghlRegistradoStageId: string | null;
   ghlFtdStageId: string | null;
   ventasSheetId: string | null;
+  // Si esta seteado, ventas-sync no arma un roster de agentes propios -
+  // acepta CUALQUIER fila del sheet compartido cuyo DIRECTOR (columna I)
+  // coincida con este correo, usando el nombre de la columna AGENTE tal
+  // cual viene. Pensado para oficinas que solo quieren ventas y pago de
+  // director, sin GHL ni roster de agentes.
+  ventasDirectorEmail: string | null;
 }
 
 // Identifica de que empresa es una llamada externa (ghl-sync, ghl-debug,
@@ -29,7 +35,7 @@ export async function resolveEmpresaFromSecret(
   const { data, error } = await supabase
     .from("empresas")
     .select(
-      "id, nombre, webhook_secret, ghl_api_token, ghl_location_id, ghl_pipeline_id, ghl_registrado_stage_id, ghl_ftd_stage_id, ventas_sheet_id"
+      "id, nombre, webhook_secret, ghl_api_token, ghl_location_id, ghl_pipeline_id, ghl_registrado_stage_id, ghl_ftd_stage_id, ventas_sheet_id, ventas_director_email"
     )
     .eq("activo", true);
   if (error || !data) return null;
@@ -46,6 +52,7 @@ export async function resolveEmpresaFromSecret(
         ghlRegistradoStageId: (row.ghl_registrado_stage_id as string | null) ?? null,
         ghlFtdStageId: (row.ghl_ftd_stage_id as string | null) ?? null,
         ventasSheetId: (row.ventas_sheet_id as string | null) ?? null,
+        ventasDirectorEmail: (row.ventas_director_email as string | null) ?? null,
       };
     }
   }
