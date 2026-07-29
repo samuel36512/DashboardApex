@@ -415,12 +415,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    if (rowsVenta.length > 0) {
+    // Segunda barrera, justo antes de guardar: colapsa por contacto_id
+    // (se queda con la ULTIMA fila de cada grupo) para que sea imposible
+    // que dos filas con el mismo contacto_id lleguen juntas al upsert, sin
+    // importar por que el filtro de mas arriba no las haya detectado. Se
+    // reportan los casos colapsados para poder diagnosticarlos.
+    const rowsVentaPorId = new Map<string, (typeof rowsVenta)[number]>();
+    const colisionesDetectadas: { contactoId: string; cliente: string; agente: string }[] = [];
+    for (const r of rowsVenta) {
+      if (rowsVentaPorId.has(r.contacto_id)) {
+        colisionesDetectadas.push({ contactoId: r.contacto_id, cliente: r.contacto_nombre, agente: r.agente });
+      }
+      rowsVentaPorId.set(r.contacto_id, r);
+    }
+    const rowsVentaFinal = Array.from(rowsVentaPorId.values());
+
+    if (rowsVentaFinal.length > 0) {
       const CHUNK = 500;
-      for (let i = 0; i < rowsVenta.length; i += CHUNK) {
+      for (let i = 0; i < rowsVentaFinal.length; i += CHUNK) {
         const { error } = await supabase
           .from("eventos")
-          .upsert(rowsVenta.slice(i, i + CHUNK), { onConflict: "empresa_id,contacto_id,tipo" });
+          .upsert(rowsVentaFinal.slice(i, i + CHUNK), { onConflict: "empresa_id,contacto_id,tipo" });
         if (error) throw new Error(`Error guardando ventas: ${error.message}`);
       }
     }
@@ -430,12 +445,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ok: true,
       pestana: tabName,
       filasLeidas: filas.length - headerIdx - 2,
-      ventasGuardadas: rowsVenta.length,
+      ventasGuardadas: rowsVentaFinal.length,
       duplicadosEvitados,
+      colisionesDetectadas,
       sinFecha,
       sinFechaDeMiEquipo: sinFechaConocidos,
       agentesNoReconocidos: Array.from(noReconocidos),
-      muestra: rowsVenta.slice(0, 3).map((r) => ({
+      muestra: rowsVentaFinal.slice(0, 3).map((r) => ({
         cliente: r.contacto_nombre,
         agente: r.agente,
         producto: r.producto,
