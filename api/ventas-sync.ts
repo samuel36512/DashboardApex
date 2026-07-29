@@ -297,6 +297,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // correo configurado, usando el nombre de la columna AGENTE tal cual
     // viene, en vez de intentar reconocerlo contra un roster/alias.
     const directorFiltroEmail = empresa.ventasDirectorEmail ? empresa.ventasDirectorEmail.toLowerCase() : null;
+    const idsEnEstaCorrida = new Set<string>();
 
     for (let i = headerIdx + 2; i < filas.length; i++) {
       const fila = filas[i];
@@ -388,6 +389,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         duplicadosEvitados++;
         continue;
       }
+      if (idsEnEstaCorrida.has(contactoId)) {
+        // Dos filas de ESTA MISMA corrida calcularon el mismo ID (mismo
+        // cliente+fecha+precio - fila repetida en el sheet, o coincidencia
+        // real). Si las dos se mandan en el mismo upsert, Postgres tira
+        // "ON CONFLICT DO UPDATE command cannot affect row a second time" y
+        // hace fallar TODO el lote, arrastrando ventas reales no
+        // relacionadas - se salta la repetida en vez de arriesgar eso.
+        duplicadosEvitados++;
+        continue;
+      }
+      idsEnEstaCorrida.add(contactoId);
       firmasExistentes.set(firma, contactoId);
 
       rowsVenta.push({
