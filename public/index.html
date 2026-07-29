@@ -1037,11 +1037,14 @@
     return rol === "director" || rol === "superadmin";
   }
 
-  // Sufijo "?empresa=ID" (o "" si no aplica) para que las llamadas del
-  // superadmin a endpoints de admin apunten a la oficina que tiene
-  // seleccionada - no tiene efecto para ningun otro rol.
-  function empresaQs() {
-    return currentEmpresaOverride ? "?empresa=" + encodeURIComponent(currentEmpresaOverride) : "";
+  // Los endpoints de /api/admin/* se consolidaron en un solo archivo
+  // (?accion=) por el limite de 12 Serverless Functions del plan gratuito
+  // de Vercel - esta funcion arma la URL completa, con el ?empresa=ID de
+  // la oficina seleccionada (superadmin) cuando aplica.
+  function adminUrl(accion) {
+    var url = "/api/admin?accion=" + encodeURIComponent(accion);
+    if (currentEmpresaOverride) url += "&empresa=" + encodeURIComponent(currentEmpresaOverride);
+    return url;
   }
 
   function el(tag, attrs, children) {
@@ -1206,7 +1209,7 @@
     ajustePanelOpen = false;
     app.innerHTML = "";
     app.appendChild(el("div", { class: "state" }, [el("div", { class: "big", text: "Cargando oficinas…" })]));
-    fetch("/api/admin/empresas", { headers: { Authorization: "Bearer " + currentAccessToken } })
+    fetch(adminUrl("empresas"), { headers: { Authorization: "Bearer " + currentAccessToken } })
       .then(function (res) {
         return res.json().then(function (body) { return { status: res.status, body: body }; });
       })
@@ -1279,7 +1282,7 @@
     ajustePanelOpen = false;
     renderShell();
     renderLoading();
-    fetch("/api/admin/global", { headers: { Authorization: "Bearer " + currentAccessToken } })
+    fetch(adminUrl("global"), { headers: { Authorization: "Bearer " + currentAccessToken } })
       .then(function (res) {
         return res.json().then(function (body) { return { status: res.status, body: body }; });
       })
@@ -1569,7 +1572,7 @@
     var header = document.querySelector("header");
     header.insertAdjacentElement("afterend", panel);
 
-    fetch("/api/admin/agentes" + empresaQs(), { headers: { Authorization: "Bearer " + currentAccessToken } })
+    fetch(adminUrl("agentes"), { headers: { Authorization: "Bearer " + currentAccessToken } })
       .then(function (res) {
         return res.json().then(function (body) { return { status: res.status, body: body }; });
       })
@@ -1611,7 +1614,7 @@
         }
         btn.disabled = true;
         btn.textContent = "Creando…";
-        fetch("/api/admin/crear-login-agente" + empresaQs(), {
+        fetch(adminUrl("crear-login-agente"), {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: "Bearer " + currentAccessToken },
           body: JSON.stringify({ agenteId: a.id, email: email }),
@@ -1673,7 +1676,7 @@
     var header = document.querySelector("header");
     header.insertAdjacentElement("afterend", panel);
 
-    fetch("/api/admin/agentes" + empresaQs(), { headers: { Authorization: "Bearer " + currentAccessToken } })
+    fetch(adminUrl("agentes"), { headers: { Authorization: "Bearer " + currentAccessToken } })
       .then(function (res) {
         return res.json().then(function (body) { return { status: res.status, body: body }; });
       })
@@ -1738,7 +1741,7 @@
       }
       btn.disabled = true;
       btn.textContent = modo === "restar" ? "Restando…" : "Agregando…";
-      fetch("/api/admin/ajuste-manual" + empresaQs(), {
+      fetch(adminUrl("ajuste-manual"), {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: "Bearer " + currentAccessToken },
         body: JSON.stringify({
@@ -1899,7 +1902,7 @@
       });
       pautaBtn.addEventListener("click", function () {
         pautaBtn.disabled = true;
-        fetch("/pauta-estado" + empresaQs(), { method: "POST", headers: { Authorization: "Bearer " + currentAccessToken } })
+        fetch("/pauta-estado" + (currentEmpresaOverride ? "?empresa=" + encodeURIComponent(currentEmpresaOverride) : ""), { method: "POST", headers: { Authorization: "Bearer " + currentAccessToken } })
           .then(function (r) { return r.json(); })
           .then(function () { loadMetrics(true, currentAccessToken); })
           .catch(function () { pautaBtn.disabled = false; });

@@ -14,6 +14,6 @@
     "api/ventas-sync.ts": { "maxDuration": 55 },
     "api/pago-director.ts": { "maxDuration": 30 },
     "api/metrics.ts": { "maxDuration": 30 },
-    "api/admin/global.ts": { "maxDuration": 45 }
+    "api/admin.ts": { "maxDuration": 45 }
   }
 }
