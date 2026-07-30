@@ -2172,10 +2172,8 @@
 
     if (esRolDirector(data.rol)) {
       content.appendChild(el("div", { class: "abonos-toggle-row" }, [
-        el("button", { class: "btn", id: "test-comision-btn", text: "Probar comisión real (test)" }),
         el("button", { class: "btn", id: "abonos-btn", text: "Abonos" }),
       ]));
-      content.appendChild(el("div", { id: "test-comision-panel", class: "abono-panel hidden" }));
       content.appendChild(el("div", { id: "abonos-panel", class: "abono-panel hidden" }));
     }
 
@@ -2220,10 +2218,7 @@
         el("div", { class: "big", text: "Todavía no hay ventas registradas" }),
       ]));
       renderContentState(content);
-      if (esRolDirector(data.rol)) {
-        wireAbonosPanel(data, abonosMontoUSD, abonosCantidad);
-        wireTestComisionPanel();
-      }
+      if (esRolDirector(data.rol)) wireAbonosPanel(data, abonosMontoUSD, abonosCantidad);
       return;
     }
 
@@ -2244,83 +2239,8 @@
     document.getElementById("updated-label").textContent =
       "Actualizado " + new Date(data.actualizado || Date.now()).toLocaleTimeString("es-419", { hour: "2-digit", minute: "2-digit" });
 
-    if (esRolDirector(data.rol)) {
-      wireAbonosPanel(data, abonosMontoUSD, abonosCantidad);
-      wireTestComisionPanel();
-    }
+    if (esRolDirector(data.rol)) wireAbonosPanel(data, abonosMontoUSD, abonosCantidad);
     cargarVentasDetalle();
-  }
-
-  var testComisionPanelOpen = false;
-
-  // Solo lectura: compara, fila por fila del sheet, la comision real de cada
-  // director (columna J) contra la formula actual (15% de su facturacion).
-  // No guarda nada - es para decidir si conviene reemplazar la formula.
-  function wireTestComisionPanel() {
-    var btn = document.getElementById("test-comision-btn");
-    var panel = document.getElementById("test-comision-panel");
-    if (!btn || !panel) return;
-
-    function cargar() {
-      panel.innerHTML = "";
-      panel.appendChild(el("div", { class: "section-title", text: "Comisión real de directores (test, no guarda nada)" }));
-      panel.appendChild(el("div", { class: "section-desc", text: "Leyendo el sheet…" }));
-      fetch(adminUrl("test-comision-director"), { headers: { Authorization: "Bearer " + currentAccessToken } })
-        .then(function (res) {
-          return res.json().then(function (body) { return { status: res.status, body: body }; });
-        })
-        .then(function (r) {
-          panel.innerHTML = "";
-          panel.appendChild(el("div", { class: "section-title", text: "Comisión real de directores (test, no guarda nada)" }));
-          if (r.status !== 200) {
-            panel.appendChild(el("div", { class: "section-desc", text: r.body.error || "No se pudo calcular" }));
-            return;
-          }
-          panel.appendChild(el("div", {
-            class: "section-desc",
-            text: "Pestaña " + r.body.pestana + " · tasa actual " + pct(r.body.tasaComisionVentasActual * 100) + " de la facturación",
-          }));
-          var wrap = el("div", { class: "venta-table-wrap" });
-          var table = el("div", { class: "venta-table" });
-          table.appendChild(el("div", { class: "venta-row header" }, [
-            el("div", { text: "Director" }),
-            el("div", { text: "Ventas" }),
-            el("div", { text: "Facturación" }),
-            el("div", { text: "Comisión actual (15%)" }),
-            el("div", { text: "Comisión real (columna J)" }),
-          ]));
-          r.body.porDirector.forEach(function (d) {
-            table.appendChild(el("div", { class: "venta-row" }, [
-              el("div", { text: d.directorRaw.split("\n").join(" · ") }),
-              el("div", { text: String(d.filas) }),
-              el("div", { text: currencyPrecise.format(d.facturacionUSD) }),
-              el("div", { text: currencyPrecise.format(d.comisionActual15pctUSD) }),
-              el("div", { text: currencyPrecise.format(d.comisionRealColumnaJUSD) }),
-            ]));
-          });
-          table.appendChild(el("div", { class: "venta-row" }, [
-            el("div", { text: "Total" }),
-            el("div", { text: "" }),
-            el("div", { text: currencyPrecise.format(r.body.totales.facturacionUSD) }),
-            el("div", { text: currencyPrecise.format(r.body.totales.comisionActual15pctUSD) }),
-            el("div", { text: currencyPrecise.format(r.body.totales.comisionRealColumnaJUSD) }),
-          ]));
-          wrap.appendChild(table);
-          panel.appendChild(wrap);
-        })
-        .catch(function () {
-          panel.innerHTML = "";
-          panel.appendChild(el("div", { class: "section-title", text: "Comisión real de directores (test, no guarda nada)" }));
-          panel.appendChild(el("div", { class: "section-desc", text: "Error de red, probá de nuevo." }));
-        });
-    }
-
-    btn.addEventListener("click", function () {
-      testComisionPanelOpen = !testComisionPanelOpen;
-      panel.classList.toggle("hidden", !testComisionPanelOpen);
-      if (testComisionPanelOpen) cargar();
-    });
-    panel.classList.toggle("hidden", !testComisionPanelOpen);
   }
 
   var abonosPanelOpen = false;
