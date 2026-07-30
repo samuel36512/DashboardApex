@@ -5,6 +5,52 @@ import { tasaDiariaCOP } from "./_lib/agentTier";
 import { getDiasActivosPautaMes } from "./_lib/pautaEstado";
 import { getAccessToken, getEmpresaOverride, requireDirector } from "./_lib/auth";
 
+const MESES_TAB_TEST = [
+  "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+  "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+];
+
+function parsePrecioTest(s: string): number {
+  return Number(String(s).replace(/[^0-9.-]/g, "")) || 0;
+}
+
+function b64urlTest(input: Buffer | string): string {
+  return Buffer.from(input).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+// Copia deliberada del mismo JWT-signing que ya usa ventas-sync.ts (no se
+// toca ese archivo para este endpoint de solo-lectura/prueba, asi el sync
+// real en produccion no corre ningun riesgo).
+async function getGoogleAccessTokenTest(credsJson: string): Promise<string> {
+  const creds = JSON.parse(credsJson);
+  const now = Math.floor(Date.now() / 1000);
+  const header = b64urlTest(JSON.stringify({ alg: "RS256", typ: "JWT" }));
+  const claims = b64urlTest(
+    JSON.stringify({
+      iss: creds.client_email,
+      scope: "https://www.googleapis.com/auth/spreadsheets.readonly",
+      aud: creds.token_uri,
+      exp: now + 3600,
+      iat: now,
+    })
+  );
+  const unsigned = `${header}.${claims}`;
+  const signature = crypto.sign("RSA-SHA256", Buffer.from(unsigned), creds.private_key);
+  const jwt = `${unsigned}.${b64urlTest(signature)}`;
+
+  const r = await fetch(creds.token_uri, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion: jwt,
+    }).toString(),
+  });
+  if (!r.ok) throw new Error(`No se pudo autenticar con Google (${r.status})`);
+  const data: any = await r.json();
+  return data.access_token;
+}
+
 // Los endpoints de /api/admin/* se consolidaron en un solo archivo (con un
 // dispatcher por ?accion=) porque el plan gratuito de Vercel tiene un
 // limite de 12 Serverless Functions por deployment - separados, sumaban
@@ -292,6 +338,114 @@ async function handleAbonos(req: VercelRequest, res: VercelResponse) {
   return res.status(200).json({ ok: true, montoUSD, cantidad, actualizadoEn });
 }
 
+// SOLO LECTURA - no guarda nada, no toca eventos ni empresas. Compara, fila
+// por fila del sheet de ventas del mes en curso, la comision real de cada
+// director (columna J, "DIRECTOR > Comision") contra lo que da la formula
+// actual (facturacion del director x tasaComisionDirectorVentas, hoy 15%
+// fijo para todos). Sirve para decidir si conviene reemplazar esa formula
+// por el dato real de la hoja - no cambia nada hasta que se decida a mano.
+async function handleTestComisionDirector(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "GET") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  const supabase = getSupabase();
+  const auth = await requireDirector(supabase, getAccessToken(req), { empresaOverride: getEmpresaOverride(req) });
+  if (!auth.ok) {
+    return res.status(auth.status).json({ error: auth.error });
+  }
+  const { empresaId } = auth.ctx;
+  const tasaComisionVentas = auth.ctx.empresa.tasaComisionDirectorVentas;
+
+  const { data: empresaRow, error: empresaError } = await supabase
+    .from("empresas")
+    .select("ventas_sheet_id")
+    .eq("id", empresaId)
+    .maybeSingle();
+  if (empresaError || !empresaRow?.ventas_sheet_id) {
+    return res.status(500).json({ error: "Esta empresa no tiene ventas_sheet_id configurado" });
+  }
+  const sheetId = empresaRow.ventas_sheet_id as string;
+
+  const credsJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+  if (!credsJson) {
+    return res.status(500).json({ error: "Falta GOOGLE_SERVICE_ACCOUNT_JSON en Vercel" });
+  }
+
+  try {
+    const token = await getGoogleAccessTokenTest(credsJson);
+    const mesParam = typeof req.query.mes === "string" ? req.query.mes.trim() : "";
+    const ahora = new Date();
+    const tabName = mesParam ? `${mesParam} ventas plataforma` : `${MESES_TAB_TEST[ahora.getMonth()]} ventas plataforma`;
+
+    const range = encodeURIComponent(`${tabName}!A:J`);
+    const valuesRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!valuesRes.ok) {
+      const body = await valuesRes.text();
+      return res.status(502).json({ error: `Google Sheets respondio ${valuesRes.status} pidiendo "${tabName}": ${body.slice(0, 300)}` });
+    }
+    const valuesData: any = await valuesRes.json();
+    const filas: any[][] = valuesData.values ?? [];
+
+    const headerIdx = filas.findIndex((f) => f[0] === "FECHA" && f[6] === "AGENTE");
+    if (headerIdx === -1) {
+      return res.status(502).json({ error: `No encontre la fila de encabezado en la pestaña "${tabName}"` });
+    }
+
+    const porDirector = new Map<string, { filas: number; facturacionUSD: number; comisionRealColumnaJUSD: number }>();
+    for (let i = headerIdx + 2; i < filas.length; i++) {
+      const fila = filas[i];
+      if (!fila || fila.every((c) => !c)) continue;
+      const cliente = (fila[1] || "").toString().trim();
+      const precioCrudo = (fila[4] || "").toString().trim();
+      const agenteSheet = (fila[6] || "").toString().trim();
+      if (!cliente || !precioCrudo || !agenteSheet) continue;
+
+      const directorRaw = (fila[8] || "").toString().trim();
+      if (!directorRaw) continue;
+
+      const monto = parsePrecioTest(precioCrudo);
+      const comisionJ = parsePrecioTest((fila[9] || "").toString().trim());
+
+      if (!porDirector.has(directorRaw)) porDirector.set(directorRaw, { filas: 0, facturacionUSD: 0, comisionRealColumnaJUSD: 0 });
+      const agg = porDirector.get(directorRaw)!;
+      agg.filas++;
+      agg.facturacionUSD += monto;
+      agg.comisionRealColumnaJUSD += comisionJ;
+    }
+
+    const porDirectorArr = Array.from(porDirector.entries()).map(([directorRaw, a]) => ({
+      directorRaw,
+      filas: a.filas,
+      facturacionUSD: Math.round(a.facturacionUSD * 100) / 100,
+      comisionActual15pctUSD: Math.round(a.facturacionUSD * tasaComisionVentas * 100) / 100,
+      comisionRealColumnaJUSD: Math.round(a.comisionRealColumnaJUSD * 100) / 100,
+    }));
+
+    const totales = porDirectorArr.reduce(
+      (acc, d) => {
+        acc.facturacionUSD += d.facturacionUSD;
+        acc.comisionActual15pctUSD += d.comisionActual15pctUSD;
+        acc.comisionRealColumnaJUSD += d.comisionRealColumnaJUSD;
+        return acc;
+      },
+      { facturacionUSD: 0, comisionActual15pctUSD: 0, comisionRealColumnaJUSD: 0 }
+    );
+
+    res.setHeader("Cache-Control", "no-store");
+    return res.status(200).json({
+      ok: true,
+      pestana: tabName,
+      tasaComisionVentasActual: tasaComisionVentas,
+      porDirector: porDirectorArr,
+      totales,
+    });
+  } catch (err: any) {
+    return res.status(502).json({ error: err?.message || "Error leyendo el sheet" });
+  }
+}
+
 async function requireSuperadmin(
   req: VercelRequest,
   res: VercelResponse,
@@ -499,6 +653,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return handleCrearLoginAgente(req, res);
     case "abonos":
       return handleAbonos(req, res);
+    case "test-comision-director":
+      return handleTestComisionDirector(req, res);
     case "empresas":
       return handleEmpresas(req, res);
     case "global":
