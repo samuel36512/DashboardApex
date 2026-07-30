@@ -114,12 +114,24 @@ create table if not exists empresas (
   -- sheet compartido cuyo DIRECTOR (columna I) coincida con este correo, y
   -- usa el nombre de la columna AGENTE tal cual viene. Nulo = comportamiento
   -- normal (roster + alias por agente).
-  ventas_director_email text
+  ventas_director_email text,
+
+  -- Abonos cargados a mano en "Ventas del equipo": a diferencia de un
+  -- ajuste, el director no suma/resta - manda el total correcto y ese valor
+  -- reemplaza por completo lo que habia antes (ver api/admin.ts, accion
+  -- "abonos"). Se suma al total de ventas reales para el hero de "Total
+  -- facturado del equipo".
+  abonos_monto_usd numeric not null default 0,
+  abonos_cantidad integer not null default 0,
+  abonos_actualizado_en timestamptz
 );
 create unique index if not exists uq_empresas_webhook_secret on empresas (webhook_secret);
 alter table empresas enable row level security;
--- La tabla empresas ya existia en vivo antes de agregar este campo:
+-- La tabla empresas ya existia en vivo antes de agregar estos campos:
 alter table empresas add column if not exists costo_por_lead_fijo_cop numeric;
+alter table empresas add column if not exists abonos_monto_usd numeric not null default 0;
+alter table empresas add column if not exists abonos_cantidad integer not null default 0;
+alter table empresas add column if not exists abonos_actualizado_en timestamptz;
 
 -- empresa_id en cada tabla existente - nullable por ahora (se llena en el
 -- paso de migracion, recien despues se pasa a NOT NULL).

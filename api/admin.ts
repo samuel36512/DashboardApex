@@ -253,6 +253,45 @@ async function handleCrearLoginAgente(req: VercelRequest, res: VercelResponse) {
   return res.status(201).json({ ok: true, email, password, agente: agente.nombre });
 }
 
+// Editar abonos: a diferencia del ajuste manual (que suma/resta de a poco),
+// acá el director manda el total correcto y ese valor REEMPLAZA por completo
+// lo que había antes - no se acumula. Pensado para reflejar el estado real
+// de abonos pendientes de cobro (ej. un cliente termina de pagar y el total
+// baja), no un historial de movimientos.
+async function handleAbonos(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  const supabase = getSupabase();
+  const auth = await requireDirector(supabase, getAccessToken(req), { empresaOverride: getEmpresaOverride(req) });
+  if (!auth.ok) {
+    return res.status(auth.status).json({ error: auth.error });
+  }
+  const { empresaId } = auth.ctx;
+
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const montoUSD = Number(body.montoUSD);
+  const cantidad = Math.trunc(Number(body.cantidad));
+
+  if (!Number.isFinite(montoUSD) || montoUSD < 0) {
+    return res.status(400).json({ error: "El monto debe ser un número mayor o igual a 0" });
+  }
+  if (!Number.isFinite(cantidad) || cantidad < 0) {
+    return res.status(400).json({ error: "La cantidad de abonos debe ser un número mayor o igual a 0" });
+  }
+
+  const actualizadoEn = new Date().toISOString();
+  const { error: updateError } = await supabase
+    .from("empresas")
+    .update({ abonos_monto_usd: montoUSD, abonos_cantidad: cantidad, abonos_actualizado_en: actualizadoEn })
+    .eq("id", empresaId);
+  if (updateError) {
+    return res.status(500).json({ error: "Error guardando los abonos: " + updateError.message });
+  }
+
+  return res.status(200).json({ ok: true, montoUSD, cantidad, actualizadoEn });
+}
+
 async function requireSuperadmin(
   req: VercelRequest,
   res: VercelResponse,
@@ -458,6 +497,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return handleAjusteManual(req, res);
     case "crear-login-agente":
       return handleCrearLoginAgente(req, res);
+    case "abonos":
+      return handleAbonos(req, res);
     case "empresas":
       return handleEmpresas(req, res);
     case "global":

@@ -25,6 +25,9 @@ export interface EmpresaRates {
   comisionPorFtdUSD: number;
   metaVentasUSD: number;
   costoPorLeadFijoCOP: number | null;
+  abonosMontoUSD: number;
+  abonosCantidad: number;
+  abonosActualizadoEn: string | null;
 }
 
 export interface AuthContext {
@@ -40,7 +43,7 @@ export interface AuthContext {
 type AuthResult = { ok: true; ctx: AuthContext } | { ok: false; status: number; error: string };
 
 const EMPRESA_COLUMNS =
-  "id, nombre, tasa_pauta_ejecutivo_cop, tasa_pauta_junior_cop, comision_director_base_usd, comision_director_alta_usd, umbral_ftd_tasa_alta, tasa_comision_director_ventas, comision_por_ftd_usd, meta_ventas_usd, costo_por_lead_fijo_cop";
+  "id, nombre, tasa_pauta_ejecutivo_cop, tasa_pauta_junior_cop, comision_director_base_usd, comision_director_alta_usd, umbral_ftd_tasa_alta, tasa_comision_director_ventas, comision_por_ftd_usd, meta_ventas_usd, costo_por_lead_fijo_cop, abonos_monto_usd, abonos_cantidad, abonos_actualizado_en";
 
 function empresaRatesDesde(empresaRow: any): EmpresaRates {
   return {
@@ -56,6 +59,9 @@ function empresaRatesDesde(empresaRow: any): EmpresaRates {
       empresaRow.costo_por_lead_fijo_cop === null || empresaRow.costo_por_lead_fijo_cop === undefined
         ? null
         : Number(empresaRow.costo_por_lead_fijo_cop),
+    abonosMontoUSD: Number(empresaRow.abonos_monto_usd ?? 0),
+    abonosCantidad: Number(empresaRow.abonos_cantidad ?? 0),
+    abonosActualizadoEn: empresaRow.abonos_actualizado_en ?? null,
   };
 }
 

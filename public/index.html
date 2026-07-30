@@ -483,6 +483,76 @@
   }
   .hero-stat-grid .hero-stat { padding: 26px 22px; }
 
+  /* ---- Abonos: desglose ventas vs. abonos ---- */
+  .split-bar {
+    height: 10px;
+    border-radius: 999px;
+    overflow: hidden;
+    display: flex;
+    margin: 4px 0 10px;
+    background: var(--gridline);
+  }
+  .split-bar .seg-ventas { background: var(--good); }
+  .split-bar .seg-abonos { background: var(--series-1); }
+  .split-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 18px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 20px;
+  }
+  .split-legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .split-legend .bd-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .breakdown-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+  .breakdown-card {
+    border-radius: 12px;
+    padding: 18px 20px;
+    border: 1px solid var(--border);
+    background: var(--surface-1);
+  }
+  .breakdown-card .bd-kicker {
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .breakdown-card .bd-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .breakdown-card.ventas .bd-dot { background: var(--good); }
+  .breakdown-card.abonos .bd-dot { background: var(--series-1); }
+  .breakdown-card .bd-value {
+    font-size: 26px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+  }
+  .breakdown-card .bd-caption { margin-top: 6px; font-size: 12px; color: var(--text-secondary); }
+  .abono-panel {
+    border: 1px solid rgba(220,174,83,0.32);
+    border-radius: 12px;
+    padding: 18px 20px;
+    background: rgba(220,174,83,0.04);
+    margin-bottom: 20px;
+  }
+  .valor-actual { font-size: 12px; color: var(--text-secondary); margin-bottom: 10px; }
+  .valor-actual b { color: var(--series-1); font-variant-numeric: tabular-nums; }
+  .abonos-toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    margin-bottom: 12px;
+  }
+  .hidden { display: none; }
+
   /* ---- Costo por FTD ---- */
   .cost-row {
     display: grid;
@@ -2095,22 +2165,62 @@
     var agentes = (data.agentes || []).slice().sort(function (a, b) { return (b.ventasUSD || 0) - (a.ventasUSD || 0); });
     var content = el("div");
 
+    var abonosMontoUSD = Number(data.abonosMontoUSD) || 0;
+    var abonosCantidad = Number(data.abonosCantidad) || 0;
+    var totalVentasEquipo = agentes.reduce(function (acc, a) { return acc + (a.ventasUSD || 0); }, 0);
+    var totalFacturado = totalVentasEquipo + abonosMontoUSD;
+
+    if (esRolDirector(data.rol)) {
+      content.appendChild(el("div", { class: "abonos-toggle-row" }, [
+        el("button", { class: "btn", id: "abonos-btn", text: "Abonos" }),
+      ]));
+      content.appendChild(el("div", { id: "abonos-panel", class: "abono-panel hidden" }));
+    }
+
+    content.appendChild(el("div", { class: "hero-stat-grid" }, [
+      el("div", { class: "hero-stat" }, [
+        el("div", { class: "hero-stat-kicker", text: "Total facturado del equipo" }),
+        el("div", { class: "hero-stat-value", text: currency.format(totalFacturado) }),
+        el("div", {
+          class: "hero-stat-caption",
+          text: agentes.length + (agentes.length === 1 ? " agente" : " agentes") + " con ventas" + (abonosCantidad > 0 ? " · incluye abonos" : ""),
+        }),
+      ]),
+    ]));
+
+    if (totalFacturado > 0) {
+      var pctVentas = Math.max(0, Math.min(100, (totalVentasEquipo / totalFacturado) * 100));
+      var pctAbonos = Math.max(0, Math.min(100, (abonosMontoUSD / totalFacturado) * 100));
+      content.appendChild(el("div", { class: "split-bar" }, [
+        el("div", { class: "seg-ventas", style: "width:" + pctVentas + "%" }),
+        el("div", { class: "seg-abonos", style: "width:" + pctAbonos + "%" }),
+      ]));
+      content.appendChild(el("div", { class: "split-legend" }, [
+        el("span", {}, [el("i", { class: "bd-dot", style: "background:var(--good)" }), el("span", { text: "Ventas totales · " + pct(pctVentas) })]),
+        el("span", {}, [el("i", { class: "bd-dot", style: "background:var(--series-1)" }), el("span", { text: "Abonos · " + pct(pctAbonos) })]),
+      ]));
+      content.appendChild(el("div", { class: "breakdown-grid" }, [
+        el("div", { class: "breakdown-card ventas" }, [
+          el("div", { class: "bd-kicker" }, [el("i", { class: "bd-dot" }), el("span", { text: "Facturación en ventas totales" })]),
+          el("div", { class: "bd-value", text: currency.format(totalVentasEquipo) }),
+          el("div", { class: "bd-caption", text: "Ventas cerradas y sincronizadas" }),
+        ]),
+        el("div", { class: "breakdown-card abonos" }, [
+          el("div", { class: "bd-kicker" }, [el("i", { class: "bd-dot" }), el("span", { text: "Facturación en abonos" })]),
+          el("div", { class: "bd-value", text: currency.format(abonosMontoUSD) }),
+          el("div", { class: "bd-caption", text: abonosCantidad + (abonosCantidad === 1 ? " abono cargado a mano" : " abonos cargados a mano") }),
+        ]),
+      ]));
+    }
+
     if (agentes.length === 0) {
       content.appendChild(el("div", { class: "card state" }, [
         el("div", { class: "big", text: "Todavía no hay ventas registradas" }),
       ]));
       renderContentState(content);
+      if (esRolDirector(data.rol)) wireAbonosPanel(data, abonosMontoUSD, abonosCantidad);
       return;
     }
-
-    var totalVentasEquipo = agentes.reduce(function (acc, a) { return acc + (a.ventasUSD || 0); }, 0);
-    content.appendChild(el("div", { class: "hero-stat-grid" }, [
-      el("div", { class: "hero-stat" }, [
-        el("div", { class: "hero-stat-kicker", text: "Total ventas del equipo" }),
-        el("div", { class: "hero-stat-value", text: currency.format(totalVentasEquipo) }),
-        el("div", { class: "hero-stat-caption", text: agentes.length + (agentes.length === 1 ? " agente" : " agentes") + " con ventas" }),
-      ]),
-    ]));
 
     content.appendChild(el("section", {}, [buildVentasChart(agentes, meta)]));
 
@@ -2129,7 +2239,85 @@
     document.getElementById("updated-label").textContent =
       "Actualizado " + new Date(data.actualizado || Date.now()).toLocaleTimeString("es-419", { hour: "2-digit", minute: "2-digit" });
 
+    if (esRolDirector(data.rol)) wireAbonosPanel(data, abonosMontoUSD, abonosCantidad);
     cargarVentasDetalle();
+  }
+
+  var abonosPanelOpen = false;
+
+  function wireAbonosPanel(data, abonosMontoUSD, abonosCantidad) {
+    var btn = document.getElementById("abonos-btn");
+    var panel = document.getElementById("abonos-panel");
+    if (!btn || !panel) return;
+
+    function renderPanel() {
+      panel.innerHTML = "";
+      panel.appendChild(el("div", { class: "section-title", text: "Editar abonos" }));
+      panel.appendChild(el("div", {
+        class: "section-desc",
+        text: "No es sumar ni restar: el valor que pongas acá reemplaza el total actual de abonos.",
+      }));
+      panel.appendChild(el("div", { class: "valor-actual" }, [
+        el("span", { text: "Valor actual: " }),
+        el("b", { text: currency.format(abonosMontoUSD) }),
+        el("span", { text: " · " }),
+        el("b", { text: String(abonosCantidad) }),
+        el("span", { text: abonosCantidad === 1 ? " abono" : " abonos" }),
+      ]));
+
+      var montoInput = el("input", { type: "number", class: "range-input", value: String(abonosMontoUSD), min: "0", step: "0.01" });
+      var cantidadInput = el("input", { type: "number", class: "range-input", value: String(abonosCantidad), min: "0" });
+      var msg = el("span", { class: "admin-msg" });
+      var guardarBtn = el("button", { class: "btn", text: "Guardar valor" });
+
+      guardarBtn.addEventListener("click", function () {
+        var montoUSD = Number(montoInput.value);
+        var cantidad = Math.trunc(Number(cantidadInput.value));
+        if (!Number.isFinite(montoUSD) || montoUSD < 0) {
+          msg.textContent = "El monto debe ser un número mayor o igual a 0";
+          return;
+        }
+        if (!Number.isFinite(cantidad) || cantidad < 0) {
+          msg.textContent = "La cantidad debe ser un número mayor o igual a 0";
+          return;
+        }
+        guardarBtn.disabled = true;
+        guardarBtn.textContent = "Guardando…";
+        fetch(adminUrl("abonos"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: "Bearer " + currentAccessToken },
+          body: JSON.stringify({ montoUSD: montoUSD, cantidad: cantidad }),
+        })
+          .then(function (res) {
+            return res.json().then(function (body) { return { status: res.status, body: body }; });
+          })
+          .then(function (r) {
+            guardarBtn.disabled = false;
+            guardarBtn.textContent = "Guardar valor";
+            if (r.status !== 200) {
+              msg.textContent = r.body.error || "No se pudo guardar";
+              return;
+            }
+            msg.textContent = "Listo: abonos actualizados.";
+            loadMetrics(true, currentAccessToken);
+          })
+          .catch(function () {
+            guardarBtn.disabled = false;
+            guardarBtn.textContent = "Guardar valor";
+            msg.textContent = "Error de red, probá de nuevo.";
+          });
+      });
+
+      panel.appendChild(el("div", { class: "admin-row" }, [montoInput, cantidadInput, guardarBtn, msg]));
+    }
+
+    renderPanel();
+
+    btn.addEventListener("click", function () {
+      abonosPanelOpen = !abonosPanelOpen;
+      panel.classList.toggle("hidden", !abonosPanelOpen);
+    });
+    panel.classList.toggle("hidden", !abonosPanelOpen);
   }
 
   function cargarVentasDetalle() {
