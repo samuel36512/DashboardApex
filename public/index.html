@@ -2510,9 +2510,10 @@
     ]);
 
     var tasaVentasPct = Math.round((data.tasaComisionVentas || 0.15) * 100);
+    var esComisionReal = data.comisionVentasFuente === "real";
     var stats = el("div", { class: "dh-stats" }, [
       el("div", { class: "dh-stat" }, [
-        el("span", { class: "dh-stat-label", text: "Comisión de ventas (" + tasaVentasPct + "%)" }),
+        el("span", { class: "dh-stat-label", text: esComisionReal ? "Comisión de ventas (real)" : "Comisión de ventas (" + tasaVentasPct + "%)" }),
         el("span", { class: "dh-stat-value", text: currencyPrecise.format(data.comisionVentasUSD || 0) }),
       ]),
       el("div", { class: "dh-stat" }, [

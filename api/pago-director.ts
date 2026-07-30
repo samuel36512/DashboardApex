@@ -1,8 +1,99 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import crypto from "node:crypto";
 import { getSupabase } from "./_lib/supabase";
 import { tasaDiariaCOP } from "./_lib/agentTier";
 import { getDiasActivosPautaMes } from "./_lib/pautaEstado";
 import { getAccessToken, getEmpresaOverride, requireAuth } from "./_lib/auth";
+
+const MESES_TAB_PAGO = [
+  "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+  "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+];
+
+function parsePrecioPago(s: string): number {
+  return Number(String(s).replace(/[^0-9.-]/g, "")) || 0;
+}
+
+function b64urlPago(input: Buffer | string): string {
+  return Buffer.from(input).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+// Copia deliberada del mismo JWT-signing que ya usa ventas-sync.ts - no se
+// toca ese archivo, asi el sync real en produccion no corre ningun riesgo.
+async function getGoogleAccessTokenPago(credsJson: string): Promise<string> {
+  const creds = JSON.parse(credsJson);
+  const now = Math.floor(Date.now() / 1000);
+  const header = b64urlPago(JSON.stringify({ alg: "RS256", typ: "JWT" }));
+  const claims = b64urlPago(
+    JSON.stringify({
+      iss: creds.client_email,
+      scope: "https://www.googleapis.com/auth/spreadsheets.readonly",
+      aud: creds.token_uri,
+      exp: now + 3600,
+      iat: now,
+    })
+  );
+  const unsigned = `${header}.${claims}`;
+  const signature = crypto.sign("RSA-SHA256", Buffer.from(unsigned), creds.private_key);
+  const jwt = `${unsigned}.${b64urlPago(signature)}`;
+
+  const r = await fetch(creds.token_uri, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion: jwt,
+    }).toString(),
+  });
+  if (!r.ok) throw new Error(`No se pudo autenticar con Google (${r.status})`);
+  const data: any = await r.json();
+  return data.access_token;
+}
+
+// Comision de ventas 100% real, leida directo del sheet (columna J, "DIRECTOR
+// > Comision"), en vez de estimarla con facturacion x tasaComisionVentas.
+// Solo se usa si la empresa tiene comision_ventas_real_emails configurado
+// (hoy solo APEX PRINCIPAL) - unifica en un solo total lo que corresponde a
+// cualquiera de los correos dados (ej. Samuel + Santiago, con o sin nombre
+// en la celda), sin importar bajo que variante de texto aparezca cada fila.
+async function comisionVentasRealDesdeSheet(
+  sheetId: string,
+  credsJson: string,
+  emailsFiltro: string[],
+  desde: string
+): Promise<number> {
+  const token = await getGoogleAccessTokenPago(credsJson);
+  const fechaRef = desde ? new Date(desde) : new Date();
+  const mesIdx = Number.isNaN(fechaRef.getTime()) ? new Date().getMonth() : fechaRef.getMonth();
+  const tabName = `${MESES_TAB_PAGO[mesIdx]} ventas plataforma`;
+  const range = encodeURIComponent(`${tabName}!A:J`);
+  const valuesRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!valuesRes.ok) throw new Error(`Google Sheets respondio ${valuesRes.status} pidiendo "${tabName}"`);
+  const valuesData: any = await valuesRes.json();
+  const filas: any[][] = valuesData.values ?? [];
+  const headerIdx = filas.findIndex((f) => f[0] === "FECHA" && f[6] === "AGENTE");
+  if (headerIdx === -1) throw new Error(`No encontre encabezado en "${tabName}"`);
+
+  const emailsSet = new Set(emailsFiltro.map((e) => e.toLowerCase()));
+  let total = 0;
+  for (let i = headerIdx + 2; i < filas.length; i++) {
+    const fila = filas[i];
+    if (!fila || fila.every((c: any) => !c)) continue;
+    const cliente = (fila[1] || "").toString().trim();
+    const precioCrudo = (fila[4] || "").toString().trim();
+    const agenteSheet = (fila[6] || "").toString().trim();
+    if (!cliente || !precioCrudo || !agenteSheet) continue;
+    const directorRaw = (fila[8] || "").toString().trim();
+    if (!directorRaw) continue;
+    const directorEmail =
+      directorRaw.split("\n").map((s: string) => s.trim()).filter(Boolean).pop()?.toLowerCase() || "";
+    if (!emailsSet.has(directorEmail)) continue;
+    total += parsePrecioPago((fila[9] || "").toString().trim());
+  }
+  return Math.round(total * 100) / 100;
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "GET") {
@@ -92,7 +183,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     facturacionEquipoUSD += a.ventasUSD;
     teamFtds += a.ftds;
   }
-  const comisionVentasUSD = facturacionEquipoUSD * TASA_COMISION_VENTAS;
+  let comisionVentasUSD = facturacionEquipoUSD * TASA_COMISION_VENTAS;
+  let comisionVentasFuente: "formula" | "real" = "formula";
+
+  const { data: empresaCfgRow } = await supabase
+    .from("empresas")
+    .select("ventas_sheet_id, comision_ventas_real_emails")
+    .eq("id", empresaId)
+    .maybeSingle();
+  const emailsFiltro = (empresaCfgRow?.comision_ventas_real_emails as string[] | null) ?? null;
+  if (emailsFiltro && emailsFiltro.length > 0) {
+    const sheetId = empresaCfgRow?.ventas_sheet_id as string | undefined;
+    const credsJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+    if (sheetId && credsJson) {
+      try {
+        comisionVentasUSD = await comisionVentasRealDesdeSheet(sheetId, credsJson, emailsFiltro, desde);
+        comisionVentasFuente = "real";
+      } catch {
+        // Si falla la lectura del sheet (Google caido, pestaña del mes
+        // todavia no existe, etc.) no se rompe el pago del director - se
+        // sigue mostrando la formula de siempre como respaldo silencioso.
+      }
+    }
+  }
 
   const tasaPorFtd = teamFtds >= UMBRAL_FTD ? TASA_ALTA : TASA_BASE;
   const bonoFtdUSD = teamFtds * tasaPorFtd;
@@ -140,6 +253,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     facturacionEquipoUSD,
     tasaComisionVentas: TASA_COMISION_VENTAS,
     comisionVentasUSD,
+    comisionVentasFuente,
     teamFtds,
     tasaBase: TASA_BASE,
     tasaAlta: TASA_ALTA,

@@ -123,7 +123,16 @@ create table if not exists empresas (
   -- facturado del equipo".
   abonos_monto_usd numeric not null default 0,
   abonos_cantidad integer not null default 0,
-  abonos_actualizado_en timestamptz
+  abonos_actualizado_en timestamptz,
+
+  -- Comision de ventas del director 100% real (ver api/pago-director.ts):
+  -- si esta lista tiene correos, la comision de ventas ya NO se estima con
+  -- tasa_comision_director_ventas x facturacion - se lee directo de la
+  -- columna J ("DIRECTOR > Comision") del sheet, sumando cualquier fila
+  -- cuyo correo de director (columna I) este en esta lista. Pensado para
+  -- unificar varias identidades (ej. el mismo director con y sin nombre en
+  -- la celda) en un solo total. Nulo/vacio = sigue la formula de siempre.
+  comision_ventas_real_emails text[]
 );
 create unique index if not exists uq_empresas_webhook_secret on empresas (webhook_secret);
 alter table empresas enable row level security;
@@ -132,6 +141,7 @@ alter table empresas add column if not exists costo_por_lead_fijo_cop numeric;
 alter table empresas add column if not exists abonos_monto_usd numeric not null default 0;
 alter table empresas add column if not exists abonos_cantidad integer not null default 0;
 alter table empresas add column if not exists abonos_actualizado_en timestamptz;
+alter table empresas add column if not exists comision_ventas_real_emails text[];
 
 -- empresa_id en cada tabla existente - nullable por ahora (se llena en el
 -- paso de migracion, recien despues se pasa a NOT NULL).
