@@ -368,8 +368,22 @@ async function handleGlobal(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: "Error leyendo empresas" });
   }
 
+  // ?mes=YYYY-MM elige un mes puntual (ej. el anterior) en vez del mes en
+  // curso - por defecto (sin el parametro) sigue siendo el mes actual, igual
+  // que antes. Los "dias activos de pauta" (usados para el gasto/costo por
+  // FTD derivado) solo existen para el mes EN CURSO - para un mes pasado se
+  // dejan en null en vez de mostrar un numero inventado, salvo que la
+  // empresa tenga costo_por_lead_fijo_cop (ese si es valido para cualquier
+  // mes, no depende de dias activos).
   const ahoraCo = new Date(Date.now() - 5 * 60 * 60 * 1000);
-  const desdeMesCo = new Date(Date.UTC(ahoraCo.getUTCFullYear(), ahoraCo.getUTCMonth(), 1, 5, 0, 0)).toISOString();
+  const mesParam = typeof req.query.mes === "string" ? req.query.mes.trim() : "";
+  const mesMatch = /^(\d{4})-(\d{2})$/.exec(mesParam);
+  const anioSel = mesMatch ? Number(mesMatch[1]) : ahoraCo.getUTCFullYear();
+  const mesSelIdx = mesMatch ? Number(mesMatch[2]) - 1 : ahoraCo.getUTCMonth();
+  const esMesActual = anioSel === ahoraCo.getUTCFullYear() && mesSelIdx === ahoraCo.getUTCMonth();
+  const desdeMesCo = new Date(Date.UTC(anioSel, mesSelIdx, 1, 5, 0, 0)).toISOString();
+  const hastaMesCo = new Date(Date.UTC(anioSel, mesSelIdx + 1, 1, 5, 0, 0)).toISOString();
+  const mesSeleccionado = `${anioSel}-${String(mesSelIdx + 1).padStart(2, "0")}`;
 
   const oficinas: any[] = [];
   const agentesGlobal: any[] = [];
@@ -408,6 +422,7 @@ async function handleGlobal(req: VercelRequest, res: VercelResponse) {
         .select("agente, tipo, monto, comision")
         .eq("empresa_id", empresaId)
         .gte("fecha", desdeMesCo)
+        .lt("fecha", hastaMesCo)
         .range(offset, offset + PAGE_GLOBAL - 1);
       if (error) {
         return res.status(500).json({ error: `Error leyendo actividad de ${empresa.nombre}` });
@@ -428,18 +443,19 @@ async function handleGlobal(req: VercelRequest, res: VercelResponse) {
       if (!page || page.length < PAGE_GLOBAL) break;
     }
 
-    const { diasActivos: diasActivosPauta } = await getDiasActivosPautaMes(supabase, empresaId);
+    const diasActivosPauta = esMesActual ? (await getDiasActivosPautaMes(supabase, empresaId)).diasActivos : 0;
 
     const agentesBase = Array.from(byAgent.entries()).map(([agente, a]) => {
       const tier = tierByAgente.get(agente) ?? null;
       const tasaDiaria = tasaDiariaCOP(tier, tasasPauta);
-      const gastoPautaCOP = tasaDiaria !== null ? Math.round(tasaDiaria * diasActivosPauta) : null;
+      const gastoPautaCOP = tasaDiaria !== null && esMesActual ? Math.round(tasaDiaria * diasActivosPauta) : null;
       return { agente, ...a, tier, gastoPautaCOP };
     });
 
     const totalLeadsMes = agentesBase.reduce((acc, a) => acc + a.leads, 0);
     const totalInvertidoCOP = agentesBase.reduce((acc, a) => acc + (a.gastoPautaCOP || 0), 0);
-    const costoPorLeadCOP = costoPorLeadFijoCOP ?? (totalLeadsMes > 0 ? totalInvertidoCOP / totalLeadsMes : null);
+    const costoPorLeadCOP =
+      costoPorLeadFijoCOP ?? (esMesActual && totalLeadsMes > 0 ? totalInvertidoCOP / totalLeadsMes : null);
 
     let totalFtds = 0;
     let totalRegistros = 0;
@@ -484,6 +500,8 @@ async function handleGlobal(req: VercelRequest, res: VercelResponse) {
   return res.status(200).json({
     oficinas,
     agentes: agentesGlobal,
+    mes: mesSeleccionado,
+    mesEsActual: esMesActual,
     actualizado: new Date().toISOString(),
   });
 }

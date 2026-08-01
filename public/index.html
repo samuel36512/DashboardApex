@@ -1070,6 +1070,7 @@
   var currentEmpresaNombre = "";
   var currentEmpresaOverride = null;
   var currentEmpresaOverrideNombre = "";
+  var currentGlobalMes = ""; // "" = mes en curso, o "YYYY-MM" para un mes puntual
   var currentView = "welcome";
   var adminPanelOpen = false;
   var ajustePanelOpen = false;
@@ -1346,13 +1347,32 @@
     }
   }
 
+  var MESES_NOMBRE = [
+    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+  ];
+
+  // Últimos 6 meses (incluido el actual) para el selector de la vista
+  // global, más nuevo primero. value "" = mes en curso.
+  function opcionesMesesGlobal() {
+    var hoy = new Date();
+    var opciones = [];
+    for (var i = 0; i < 6; i++) {
+      var d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
+      var value = i === 0 ? "" : d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+      opciones.push({ value: value, label: MESES_NOMBRE[d.getMonth()] + " " + d.getFullYear() });
+    }
+    return opciones;
+  }
+
   function enterGlobalView() {
     currentView = "global";
     adminPanelOpen = false;
     ajustePanelOpen = false;
     renderShell();
     renderLoading();
-    fetch(adminUrl("global"), { headers: { Authorization: "Bearer " + currentAccessToken } })
+    var qs = currentGlobalMes ? "&mes=" + encodeURIComponent(currentGlobalMes) : "";
+    fetch(adminUrl("global") + qs, { headers: { Authorization: "Bearer " + currentAccessToken } })
       .then(function (res) {
         return res.json().then(function (body) { return { status: res.status, body: body }; });
       })
@@ -1370,6 +1390,24 @@
     var oficinas = data.oficinas || [];
     var agentes = (data.agentes || []).slice();
 
+    var mesMatch = /^(\d{4})-(\d{2})$/.exec(data.mes || "");
+    var mesLabel = mesMatch ? MESES_NOMBRE[Number(mesMatch[2]) - 1] + " " + mesMatch[1] : "este mes";
+
+    var mesSelect = el("select", { class: "range-input" });
+    opcionesMesesGlobal().forEach(function (o) {
+      mesSelect.appendChild(el("option", { value: o.value, text: o.label }));
+    });
+    mesSelect.value = currentGlobalMes;
+    mesSelect.addEventListener("change", function () {
+      currentGlobalMes = mesSelect.value;
+      enterGlobalView();
+    });
+    content.appendChild(el("div", { class: "range-row active" }, [
+      el("span", { class: "range-label", text: "Mes:" }),
+      mesSelect,
+      data.mesEsActual === false ? el("span", { class: "range-label", text: "(mes cerrado, algunos costos derivados no aplican)" }) : null,
+    ]));
+
     var totalFtdsGlobal = oficinas.reduce(function (acc, o) { return acc + (o.totalFtds || 0); }, 0);
     var totalVentasGlobal = oficinas.reduce(function (acc, o) { return acc + (o.totalVentasUSD || 0); }, 0);
     var nombresOficinas = oficinas.map(function (o) { return o.empresaNombre; }).join(", ");
@@ -1377,12 +1415,12 @@
       el("div", { class: "hero-stat" }, [
         el("div", { class: "hero-stat-kicker", text: "FTD totales" }),
         el("div", { class: "hero-stat-value", text: totalFtdsGlobal.toLocaleString("en-US") }),
-        el("div", { class: "hero-stat-caption", text: "Sumando " + nombresOficinas + " este mes" }),
+        el("div", { class: "hero-stat-caption", text: "Sumando " + nombresOficinas + " en " + mesLabel }),
       ]),
       el("div", { class: "hero-stat" }, [
         el("div", { class: "hero-stat-kicker", text: "Total ventas" }),
         el("div", { class: "hero-stat-value", text: currency.format(totalVentasGlobal) }),
-        el("div", { class: "hero-stat-caption", text: "Sumando " + nombresOficinas + " este mes" }),
+        el("div", { class: "hero-stat-caption", text: "Sumando " + nombresOficinas + " en " + mesLabel }),
       ]),
     ]));
 
