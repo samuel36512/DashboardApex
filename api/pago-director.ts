@@ -120,6 +120,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if ((desde && Number.isNaN(Date.parse(desde))) || (hasta && Number.isNaN(Date.parse(hasta)))) {
     return res.status(400).json({ error: "desde/hasta deben ser fechas validas" });
   }
+  // "Dias activos de pauta" solo existe para el mes EN CURSO - si el
+  // director elige un mes cerrado (ver selector de mes en Pago de
+  // directores), el gasto/costo por FTD derivado de ese modelo no aplica y
+  // se deja en null en vez de mostrar un numero inventado. La comision de
+  // ventas real (columna J del sheet, cuando esta configurada) no depende de
+  // esto - ya usa "desde" para elegir la pestaña del mes correcto.
+  const ahoraCo = new Date(Date.now() - 5 * 60 * 60 * 1000);
+  const desdeDate = desde ? new Date(desde) : null;
+  const esMesActual =
+    !desdeDate || (desdeDate.getUTCFullYear() === ahoraCo.getUTCFullYear() && desdeDate.getUTCMonth() === ahoraCo.getUTCMonth());
 
   const { data: agentesRows, error: agentesError } = await supabase
     .from("agentes")
@@ -216,22 +226,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // suma para tener el gasto real de la oficina, se divide entre el total de
   // leads del mes para el costo por lead, y ESE costo por lead x los leads
   // propios de cada agente da su gasto real - dividido entre sus FTD, el
-  // costo por FTD real. Como desde/hasta ya vienen fijados al mes en curso
-  // para esta vista, a.ftds/a.leads ya son los conteos reales del mes.
-  const { diasActivos: diasActivosPauta } = await getDiasActivosPautaMes(supabase, empresaId);
+  // costo por FTD real. Cuando desde/hasta son del mes en curso, a.ftds/a.leads
+  // ya son los conteos reales del mes - para un mes cerrado (esMesActual
+  // false) este modelo no aplica (ver arriba) y gastoPautaCOP queda null.
+  const diasActivosPauta = esMesActual ? (await getDiasActivosPautaMes(supabase, empresaId)).diasActivos : 0;
   const tasasPauta = {
     ejecutivoCOP: auth.ctx.empresa.tasaPautaEjecutivoCOP,
     juniorCOP: auth.ctx.empresa.tasaPautaJuniorCOP,
   };
   const agentesBase = Array.from(byAgent.entries()).map(([agente, a]) => {
     const tasaDiaria = tasaDiariaCOP(tierByAgente.get(agente) ?? null, tasasPauta);
-    const gastoPautaCOP = tasaDiaria !== null ? Math.round(tasaDiaria * diasActivosPauta) : null;
+    const gastoPautaCOP = tasaDiaria !== null && esMesActual ? Math.round(tasaDiaria * diasActivosPauta) : null;
     return { agente, ftds: a.ftds, ventasUSD: a.ventasUSD, leads: a.leads, gastoPautaCOP };
   });
   const totalInvertidoCOP = agentesBase.reduce((acc, a) => acc + (a.gastoPautaCOP || 0), 0);
   const totalLeadsMes = agentesBase.reduce((acc, a) => acc + (a.leads || 0), 0);
   const costoPorLeadCOP =
-    auth.ctx.empresa.costoPorLeadFijoCOP ?? (totalLeadsMes > 0 ? totalInvertidoCOP / totalLeadsMes : null);
+    auth.ctx.empresa.costoPorLeadFijoCOP ?? (esMesActual && totalLeadsMes > 0 ? totalInvertidoCOP / totalLeadsMes : null);
 
   const agentesArr = agentesBase.map((a) => {
     const gastoRealCOP = costoPorLeadCOP !== null ? Math.round(costoPorLeadCOP * a.leads) : null;
@@ -267,6 +278,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     estrellaVentas,
     estrellaCosto,
     necesitaAtencion,
+    mesEsActual: esMesActual,
     actualizado: new Date().toISOString(),
     filtro: { desde: desde || null, hasta: hasta || null },
   });

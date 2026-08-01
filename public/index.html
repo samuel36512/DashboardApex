@@ -1071,6 +1071,7 @@
   var currentEmpresaOverride = null;
   var currentEmpresaOverrideNombre = "";
   var currentGlobalMes = ""; // "" = mes en curso, o "YYYY-MM" para un mes puntual
+  var currentPagoDirectorMes = ""; // idem, para Pago de directores
   var currentView = "welcome";
   var adminPanelOpen = false;
   var ajustePanelOpen = false;
@@ -2462,8 +2463,23 @@
   function renderPagoDirectorView(data) {
     var content = el("div");
 
+    var pdMesSelect = el("select", { class: "range-input" });
+    opcionesMesesGlobal().forEach(function (o) {
+      pdMesSelect.appendChild(el("option", { value: o.value, text: o.label }));
+    });
+    pdMesSelect.value = currentPagoDirectorMes;
+    pdMesSelect.addEventListener("change", function () {
+      currentPagoDirectorMes = pdMesSelect.value;
+      loadMetrics(true, currentAccessToken);
+    });
+    content.appendChild(el("div", { class: "range-row active" }, [
+      el("span", { class: "range-label", text: "Mes:" }),
+      pdMesSelect,
+      data.mesEsActual === false ? el("span", { class: "range-label", text: "(mes cerrado, algunos costos derivados no aplican)" }) : null,
+    ]));
+
     var hero = el("div", { class: "card director-hero" }, [
-      el("div", { class: "dh-label", text: "Tu pago estimado este mes" }),
+      el("div", { class: "dh-label", text: currentPagoDirectorMes ? "Tu pago estimado ese mes" : "Tu pago estimado este mes" }),
       el("div", { class: "dh-total", text: currencyPrecise.format(data.totalUSD || 0) }),
     ]);
 
@@ -2920,6 +2936,12 @@
       qs = "?desde=" + encodeURIComponent(localDayStartIso(currentDesde)) + "&hasta=" + encodeURIComponent(localDayEndIso(currentHasta));
     } else if (currentView === "usuarios" && usuariosDesde && usuariosHasta) {
       qs = "?desde=" + encodeURIComponent(localDayStartIso(usuariosDesde)) + "&hasta=" + encodeURIComponent(localDayEndIso(usuariosHasta));
+    } else if (currentView === "pago-director" && currentPagoDirectorMes) {
+      var mMatch = /^(\d{4})-(\d{2})$/.exec(currentPagoDirectorMes);
+      var mAnio = Number(mMatch[1]), mMes = Number(mMatch[2]) - 1;
+      var mInicio = fmtDate(new Date(mAnio, mMes, 1));
+      var mFin = fmtDate(new Date(mAnio, mMes + 1, 0));
+      qs = "?desde=" + encodeURIComponent(localDayStartIso(mInicio)) + "&hasta=" + encodeURIComponent(localDayEndIso(mFin));
     } else if (currentView === "ranking" || currentView === "pago-director" || currentView === "mi-ganancia") {
       var hoyStr = fmtDate(new Date());
       var inicioMesStr = fmtDate(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
