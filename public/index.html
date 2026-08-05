@@ -1073,6 +1073,7 @@
   var currentGlobalMes = ""; // "" = mes en curso, o "YYYY-MM" para un mes puntual
   var currentPagoDirectorMes = ""; // idem, para Pago de directores
   var currentRankingMes = ""; // idem, para Ranking equipo
+  var currentVentasEquipoMes = ""; // "" = todo el histórico (default de siempre), o "YYYY-MM"
   var currentView = "welcome";
   var adminPanelOpen = false;
   var ajustePanelOpen = false;
@@ -1363,6 +1364,23 @@
       var d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
       var value = i === 0 ? "" : d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
       opciones.push({ value: value, label: MESES_NOMBRE[d.getMonth()] + " " + d.getFullYear() });
+    }
+    return opciones;
+  }
+
+  // Variante para Ventas del equipo: por default esa vista muestra el total
+  // histórico (sin filtro de fecha, como siempre lo hizo), así que acá "" es
+  // "Todo" en vez de "mes en curso" - cada mes (incluido el actual) tiene su
+  // propio valor "YYYY-MM" real.
+  function opcionesMesesConTodo() {
+    var hoy = new Date();
+    var opciones = [{ value: "", label: "Todo (histórico)" }];
+    for (var i = 0; i < 6; i++) {
+      var d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
+      opciones.push({
+        value: d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"),
+        label: MESES_NOMBRE[d.getMonth()] + " " + d.getFullYear(),
+      });
     }
     return opciones;
   }
@@ -2220,12 +2238,30 @@
     var agentes = (data.agentes || []).slice().sort(function (a, b) { return (b.ventasUSD || 0) - (a.ventasUSD || 0); });
     var content = el("div");
 
-    var abonosMontoUSD = Number(data.abonosMontoUSD) || 0;
-    var abonosCantidad = Number(data.abonosCantidad) || 0;
+    // Los abonos son un saldo ACTUAL (no tienen historia por mes) - solo
+    // tiene sentido sumarlos al total cuando se mira "Todo"; en un mes
+    // puntual ya cerrado, sumar el saldo de hoy sería engañoso.
+    var mostrarAbonos = !currentVentasEquipoMes;
+    var abonosMontoUSD = mostrarAbonos ? Number(data.abonosMontoUSD) || 0 : 0;
+    var abonosCantidad = mostrarAbonos ? Number(data.abonosCantidad) || 0 : 0;
     var totalVentasEquipo = agentes.reduce(function (acc, a) { return acc + (a.ventasUSD || 0); }, 0);
     var totalFacturado = totalVentasEquipo + abonosMontoUSD;
 
-    if (esRolDirector(data.rol)) {
+    var veMesSelect = el("select", { class: "range-input" });
+    opcionesMesesConTodo().forEach(function (o) {
+      veMesSelect.appendChild(el("option", { value: o.value, text: o.label }));
+    });
+    veMesSelect.value = currentVentasEquipoMes;
+    veMesSelect.addEventListener("change", function () {
+      currentVentasEquipoMes = veMesSelect.value;
+      loadMetrics(true, currentAccessToken);
+    });
+    content.appendChild(el("div", { class: "range-row active" }, [
+      el("span", { class: "range-label", text: "Mes:" }),
+      veMesSelect,
+    ]));
+
+    if (esRolDirector(data.rol) && mostrarAbonos) {
       content.appendChild(el("div", { class: "abonos-toggle-row" }, [
         el("button", { class: "btn", id: "abonos-btn", text: "Abonos" }),
       ]));
@@ -2234,7 +2270,7 @@
 
     content.appendChild(el("div", { class: "hero-stat-grid" }, [
       el("div", { class: "hero-stat" }, [
-        el("div", { class: "hero-stat-kicker", text: "Total facturado del equipo" }),
+        el("div", { class: "hero-stat-kicker", text: mostrarAbonos ? "Total facturado del equipo" : "Total ventas del equipo" }),
         el("div", { class: "hero-stat-value", text: currency.format(totalFacturado) }),
         el("div", {
           class: "hero-stat-caption",
@@ -2243,7 +2279,7 @@
       ]),
     ]));
 
-    if (totalFacturado > 0) {
+    if (mostrarAbonos && totalFacturado > 0) {
       var pctVentas = Math.max(0, Math.min(100, (totalVentasEquipo / totalFacturado) * 100));
       var pctAbonos = Math.max(0, Math.min(100, (abonosMontoUSD / totalFacturado) * 100));
       content.appendChild(el("div", { class: "split-bar" }, [
@@ -2273,7 +2309,7 @@
         el("div", { class: "big", text: "Todavía no hay ventas registradas" }),
       ]));
       renderContentState(content);
-      if (esRolDirector(data.rol)) wireAbonosPanel(data, abonosMontoUSD, abonosCantidad);
+      if (esRolDirector(data.rol) && mostrarAbonos) wireAbonosPanel(data, abonosMontoUSD, abonosCantidad);
       return;
     }
 
@@ -2294,7 +2330,7 @@
     document.getElementById("updated-label").textContent =
       "Actualizado " + new Date(data.actualizado || Date.now()).toLocaleTimeString("es-419", { hour: "2-digit", minute: "2-digit" });
 
-    if (esRolDirector(data.rol)) wireAbonosPanel(data, abonosMontoUSD, abonosCantidad);
+    if (esRolDirector(data.rol) && mostrarAbonos) wireAbonosPanel(data, abonosMontoUSD, abonosCantidad);
     cargarVentasDetalle();
   }
 
@@ -2952,8 +2988,15 @@
       qs = "?desde=" + encodeURIComponent(localDayStartIso(currentDesde)) + "&hasta=" + encodeURIComponent(localDayEndIso(currentHasta));
     } else if (currentView === "usuarios" && usuariosDesde && usuariosHasta) {
       qs = "?desde=" + encodeURIComponent(localDayStartIso(usuariosDesde)) + "&hasta=" + encodeURIComponent(localDayEndIso(usuariosHasta));
-    } else if ((currentView === "pago-director" && currentPagoDirectorMes) || (currentView === "ranking" && currentRankingMes)) {
-      var mesElegido = currentView === "pago-director" ? currentPagoDirectorMes : currentRankingMes;
+    } else if (
+      (currentView === "pago-director" && currentPagoDirectorMes) ||
+      (currentView === "ranking" && currentRankingMes) ||
+      (currentView === "ventas-equipo" && currentVentasEquipoMes)
+    ) {
+      var mesElegido =
+        currentView === "pago-director" ? currentPagoDirectorMes :
+        currentView === "ranking" ? currentRankingMes :
+        currentVentasEquipoMes;
       var mMatch = /^(\d{4})-(\d{2})$/.exec(mesElegido);
       var mAnio = Number(mMatch[1]), mMes = Number(mMatch[2]) - 1;
       var mInicio = fmtDate(new Date(mAnio, mMes, 1));
