@@ -12,12 +12,17 @@ export interface EmpresaConfig {
   ghlRegistradoStageId: string | null;
   ghlFtdStageId: string | null;
   ventasSheetId: string | null;
-  // Si esta seteado, ventas-sync no arma un roster de agentes propios -
-  // acepta CUALQUIER fila del sheet compartido cuyo DIRECTOR (columna I)
-  // coincida con este correo, usando el nombre de la columna AGENTE tal
-  // cual viene. Pensado para oficinas que solo quieren ventas y pago de
-  // director, sin GHL ni roster de agentes.
-  ventasDirectorEmail: string | null;
+  // Correos que identifican a este director en la columna DIRECTOR del
+  // sheet compartido - es una LISTA porque la misma persona a veces aparece
+  // con variantes distintas en esa columna (ej. con/sin nombre adelante, o
+  // un dominio mal tipeado como "@1234" en vez de ".com"). Se usa en dos
+  // lugares de ventas-sync: (1) oficinas sin roster propio (ej. LEGENDARY)
+  // aceptan CUALQUIER fila cuyo DIRECTOR este en esta lista, usando el
+  // nombre de AGENTE tal cual viene; (2) oficinas CON roster (APEX, PRIME,
+  // ÉLITE) la usan solo como respaldo cuando el roster/alias no reconoce el
+  // nombre, para que un agente nuevo no quede bloqueado hasta que se agregue
+  // a mano. Vacio = sin respaldo, comportamiento 100% roster/alias.
+  ventasDirectorEmails: string[];
 }
 
 // Identifica de que empresa es una llamada externa (ghl-sync, ghl-debug,
@@ -35,7 +40,7 @@ export async function resolveEmpresaFromSecret(
   const { data, error } = await supabase
     .from("empresas")
     .select(
-      "id, nombre, webhook_secret, ghl_api_token, ghl_location_id, ghl_pipeline_id, ghl_registrado_stage_id, ghl_ftd_stage_id, ventas_sheet_id, ventas_director_email"
+      "id, nombre, webhook_secret, ghl_api_token, ghl_location_id, ghl_pipeline_id, ghl_registrado_stage_id, ghl_ftd_stage_id, ventas_sheet_id, ventas_director_emails"
     )
     .eq("activo", true);
   if (error || !data) return null;
@@ -52,7 +57,7 @@ export async function resolveEmpresaFromSecret(
         ghlRegistradoStageId: (row.ghl_registrado_stage_id as string | null) ?? null,
         ghlFtdStageId: (row.ghl_ftd_stage_id as string | null) ?? null,
         ventasSheetId: (row.ventas_sheet_id as string | null) ?? null,
-        ventasDirectorEmail: (row.ventas_director_email as string | null) ?? null,
+        ventasDirectorEmails: ((row.ventas_director_emails as string[] | null) ?? []).map((e) => e.toLowerCase()),
       };
     }
   }

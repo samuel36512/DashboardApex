@@ -109,12 +109,15 @@ create table if not exists empresas (
   -- /pago-director. Nulo = se sigue derivando como siempre.
   costo_por_lead_fijo_cop numeric,
 
-  -- Oficinas sin GHL propio y sin roster de agentes (ej. LEGENDARY): en vez
-  -- de reconocer agentes uno por uno, ventas-sync acepta cualquier fila del
-  -- sheet compartido cuyo DIRECTOR (columna I) coincida con este correo, y
-  -- usa el nombre de la columna AGENTE tal cual viene. Nulo = comportamiento
-  -- normal (roster + alias por agente).
-  ventas_director_email text,
+  -- Correos que identifican a este director en la columna DIRECTOR del
+  -- sheet compartido (lista porque la misma persona a veces aparece con
+  -- variantes distintas en esa columna). Oficinas sin roster de agentes
+  -- propio (ej. LEGENDARY) aceptan CUALQUIER fila cuyo DIRECTOR este en esta
+  -- lista, usando el nombre de AGENTE tal cual viene. Oficinas CON roster
+  -- (APEX, PRIME, ÉLITE) la usan solo como respaldo cuando el roster/alias
+  -- no reconoce un nombre, para que un agente nuevo no quede bloqueado hasta
+  -- que se agregue a mano. Vacio = sin respaldo (comportamiento normal).
+  ventas_director_emails text[],
 
   -- Abonos cargados a mano en "Ventas del equipo": a diferencia de un
   -- ajuste, el director no suma/resta - manda el total correcto y ese valor
@@ -142,6 +145,9 @@ alter table empresas add column if not exists abonos_monto_usd numeric not null 
 alter table empresas add column if not exists abonos_cantidad integer not null default 0;
 alter table empresas add column if not exists abonos_actualizado_en timestamptz;
 alter table empresas add column if not exists comision_ventas_real_emails text[];
+-- Reemplaza a la vieja ventas_director_email (singular, columna previa que
+-- queda sin usar en el codigo pero no se borra automaticamente):
+alter table empresas add column if not exists ventas_director_emails text[];
 
 -- empresa_id en cada tabla existente - nullable por ahora (se llena en el
 -- paso de migracion, recien despues se pasa a NOT NULL).

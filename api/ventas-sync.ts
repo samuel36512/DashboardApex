@@ -32,27 +32,28 @@ function coincidePorPalabras(sheetNombreNorm: string, agenteNombre: string): boo
 // Roster/alias sigue siendo el metodo PRINCIPAL (asi los agentes ya
 // configurados no se fragmentan por variantes de escritura del sheet, y
 // conservan su tier para el costo de pauta). Si el roster no reconoce el
-// nombre y la empresa tiene ventasDirectorEmail configurado, se usa como
-// respaldo: si la fila es de ese director, se toma el nombre de la columna
-// AGENTE tal cual viene - asi un agente nuevo que todavia no se agrego al
-// roster no se pierde ni queda bloqueado hasta que alguien lo de de alta a
-// mano. Para oficinas sin roster propio (ej. LEGENDARY, agentesActivos
-// vacio) esto se comporta exactamente igual que antes: siempre cae al
-// respaldo por director.
+// nombre y la empresa tiene ventasDirectorEmails configurado, se usa como
+// respaldo: si la fila es de ese director (cualquiera de sus correos/
+// variantes conocidas), se toma el nombre de la columna AGENTE tal cual
+// viene - asi un agente nuevo que todavia no se agrego al roster no se
+// pierde ni queda bloqueado hasta que alguien lo de de alta a mano. Para
+// oficinas sin roster propio (ej. LEGENDARY, agentesActivos vacio) esto se
+// comporta exactamente igual que antes: siempre cae al respaldo por
+// director.
 function resolverAgente(
   agenteSheet: string,
   directorFilaRaw: string,
   agentesActivos: string[],
   emailToAgente: Map<string, string>,
   aliasToAgente: Map<string, string>,
-  directorFiltroEmail: string | null
+  directorFiltroEmails: Set<string>
 ): string | null {
   const porRoster = mapearAgente(agenteSheet, agentesActivos, emailToAgente, aliasToAgente);
   if (porRoster) return porRoster;
-  if (!directorFiltroEmail) return null;
+  if (directorFiltroEmails.size === 0) return null;
   const directorEmail =
     directorFilaRaw.split("\n").map((s) => s.trim()).filter(Boolean).pop()?.toLowerCase() || "";
-  if (directorEmail !== directorFiltroEmail) return null;
+  if (!directorFiltroEmails.has(directorEmail)) return null;
   return (agenteSheet.split("\n")[0] || agenteSheet).trim();
 }
 
@@ -320,10 +321,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let sinFecha = 0;
 
     // Oficinas como LEGENDARY no tienen roster propio de agentes - se
-    // acepta cualquier fila cuyo DIRECTOR (columna I) coincida con el
-    // correo configurado, usando el nombre de la columna AGENTE tal cual
-    // viene, en vez de intentar reconocerlo contra un roster/alias.
-    const directorFiltroEmail = empresa.ventasDirectorEmail ? empresa.ventasDirectorEmail.toLowerCase() : null;
+    // acepta cualquier fila cuyo DIRECTOR (columna I) coincida con alguno de
+    // estos correos, usando el nombre de la columna AGENTE tal cual viene,
+    // en vez de intentar reconocerlo contra un roster/alias. Para las demas
+    // oficinas esto es solo un respaldo (ver resolverAgente).
+    const directorFiltroEmails = new Set(empresa.ventasDirectorEmails);
     const idsEnEstaCorrida = new Set<string>();
 
     for (let i = headerIdx + 2; i < filas.length; i++) {
@@ -364,7 +366,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // respaldo de director), vale la pena saberlo - significa que se
         // esta perdiendo una venta real por falta de fecha.
         const agenteConocido = resolverAgente(
-          agenteSheet, directorFilaRaw, agentesActivos, emailToAgente, aliasToAgente, directorFiltroEmail
+          agenteSheet, directorFilaRaw, agentesActivos, emailToAgente, aliasToAgente, directorFiltroEmails
         );
         if (agenteConocido) {
           sinFechaConocidos.push({ agente: agenteConocido, cliente, producto, fechaCruda });
@@ -373,7 +375,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       const agente = resolverAgente(
-        agenteSheet, directorFilaRaw, agentesActivos, emailToAgente, aliasToAgente, directorFiltroEmail
+        agenteSheet, directorFilaRaw, agentesActivos, emailToAgente, aliasToAgente, directorFiltroEmails
       );
       if (!agente) {
         // Sin filtro por director: nombre realmente no reconocido, vale la
@@ -381,7 +383,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // por director: si no matcheo es porque la fila es de otra
         // oficina/empresa compartiendo el mismo sheet - se descarta en
         // silencio, no es ruido util para este director.
-        if (!directorFiltroEmail) noReconocidos.add(agenteSheet);
+        if (directorFiltroEmails.size === 0) noReconocidos.add(agenteSheet);
         continue;
       }
 
