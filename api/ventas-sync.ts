@@ -29,6 +29,33 @@ function coincidePorPalabras(sheetNombreNorm: string, agenteNombre: string): boo
   return palabrasAgente.every((p) => palabrasSheet.includes(p));
 }
 
+// Roster/alias sigue siendo el metodo PRINCIPAL (asi los agentes ya
+// configurados no se fragmentan por variantes de escritura del sheet, y
+// conservan su tier para el costo de pauta). Si el roster no reconoce el
+// nombre y la empresa tiene ventasDirectorEmail configurado, se usa como
+// respaldo: si la fila es de ese director, se toma el nombre de la columna
+// AGENTE tal cual viene - asi un agente nuevo que todavia no se agrego al
+// roster no se pierde ni queda bloqueado hasta que alguien lo de de alta a
+// mano. Para oficinas sin roster propio (ej. LEGENDARY, agentesActivos
+// vacio) esto se comporta exactamente igual que antes: siempre cae al
+// respaldo por director.
+function resolverAgente(
+  agenteSheet: string,
+  directorFilaRaw: string,
+  agentesActivos: string[],
+  emailToAgente: Map<string, string>,
+  aliasToAgente: Map<string, string>,
+  directorFiltroEmail: string | null
+): string | null {
+  const porRoster = mapearAgente(agenteSheet, agentesActivos, emailToAgente, aliasToAgente);
+  if (porRoster) return porRoster;
+  if (!directorFiltroEmail) return null;
+  const directorEmail =
+    directorFilaRaw.split("\n").map((s) => s.trim()).filter(Boolean).pop()?.toLowerCase() || "";
+  if (directorEmail !== directorFiltroEmail) return null;
+  return (agenteSheet.split("\n")[0] || agenteSheet).trim();
+}
+
 function mapearAgente(
   sheetNombre: string,
   agentesActivos: string[],
@@ -329,36 +356,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       } else {
         fechaIso = ultimaFechaValida || null;
       }
+      const directorFilaRaw = (fila[8] || "").toString().trim();
+
       if (!fechaIso) {
         sinFecha++;
-        // Si la fila SI es de uno de nuestros agentes, vale la pena saberlo -
-        // significa que se esta perdiendo una venta real por falta de fecha,
-        // no solo filas de gente ajena al equipo. No aplica en modo
-        // filtro-por-director (no hay roster contra el cual reconocer).
-        if (!directorFiltroEmail) {
-          const agenteConocido = mapearAgente(agenteSheet, agentesActivos, emailToAgente, aliasToAgente);
-          if (agenteConocido) {
-            sinFechaConocidos.push({ agente: agenteConocido, cliente, producto, fechaCruda });
-          }
+        // Si la fila SI es de uno de nuestros agentes (por roster o por
+        // respaldo de director), vale la pena saberlo - significa que se
+        // esta perdiendo una venta real por falta de fecha.
+        const agenteConocido = resolverAgente(
+          agenteSheet, directorFilaRaw, agentesActivos, emailToAgente, aliasToAgente, directorFiltroEmail
+        );
+        if (agenteConocido) {
+          sinFechaConocidos.push({ agente: agenteConocido, cliente, producto, fechaCruda });
         }
         continue;
       }
 
-      let agente: string | null;
-      if (directorFiltroEmail) {
-        const directorSheet = (fila[8] || "").toString().trim();
-        const directorEmail =
-          directorSheet.split("\n").map((s: string) => s.trim()).filter(Boolean).pop()?.toLowerCase() || "";
-        if (directorEmail !== directorFiltroEmail) continue; // fila de otra oficina, se ignora sin mas
-        agente = (agenteSheet.split("\n")[0] || agenteSheet).trim();
-      } else {
-        agente = mapearAgente(agenteSheet, agentesActivos, emailToAgente, aliasToAgente);
-        if (!agente) {
-          noReconocidos.add(agenteSheet);
-          continue;
-        }
+      const agente = resolverAgente(
+        agenteSheet, directorFilaRaw, agentesActivos, emailToAgente, aliasToAgente, directorFiltroEmail
+      );
+      if (!agente) {
+        // Sin filtro por director: nombre realmente no reconocido, vale la
+        // pena reportarlo para que se agregue al roster/alias. Con filtro
+        // por director: si no matcheo es porque la fila es de otra
+        // oficina/empresa compartiendo el mismo sheet - se descarta en
+        // silencio, no es ruido util para este director.
+        if (!directorFiltroEmail) noReconocidos.add(agenteSheet);
+        continue;
       }
-      if (!agente) continue;
 
       const montoParsed = parsePrecio(precioCrudo);
       const productoFinal = producto || "Sin especificar";
