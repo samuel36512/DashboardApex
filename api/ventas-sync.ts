@@ -34,19 +34,22 @@ function coincidePorPalabras(sheetNombreNorm: string, agenteNombre: string): boo
 // conservan su tier para el costo de pauta). Si el roster no reconoce el
 // nombre y la empresa tiene ventasDirectorEmails configurado, se usa como
 // respaldo: si la fila es de ese director (cualquiera de sus correos/
-// variantes conocidas), se toma el nombre de la columna AGENTE tal cual
-// viene - asi un agente nuevo que todavia no se agrego al roster no se
-// pierde ni queda bloqueado hasta que alguien lo de de alta a mano. Para
+// variantes conocidas) y el nombre NO esta en agente_bloqueado, se toma el
+// nombre de la columna AGENTE tal cual viene - asi un agente nuevo que
+// todavia no se agrego al roster no se pierde ni queda bloqueado hasta que
+// alguien lo de de alta a mano. La lista de bloqueados es para lo opuesto:
+// gente que ya no trabaja mas, para que no la vuelva a traer sola. Para
 // oficinas sin roster propio (ej. LEGENDARY, agentesActivos vacio) esto se
 // comporta exactamente igual que antes: siempre cae al respaldo por
-// director.
+// director (salvo que este bloqueado).
 function resolverAgente(
   agenteSheet: string,
   directorFilaRaw: string,
   agentesActivos: string[],
   emailToAgente: Map<string, string>,
   aliasToAgente: Map<string, string>,
-  directorFiltroEmails: Set<string>
+  directorFiltroEmails: Set<string>,
+  nombresBloqueados: Set<string>
 ): string | null {
   const porRoster = mapearAgente(agenteSheet, agentesActivos, emailToAgente, aliasToAgente);
   if (porRoster) return porRoster;
@@ -54,7 +57,9 @@ function resolverAgente(
   const directorEmail =
     directorFilaRaw.split("\n").map((s) => s.trim()).filter(Boolean).pop()?.toLowerCase() || "";
   if (!directorFiltroEmails.has(directorEmail)) return null;
-  return (agenteSheet.split("\n")[0] || agenteSheet).trim();
+  const nombreCrudo = (agenteSheet.split("\n")[0] || agenteSheet).trim();
+  if (nombresBloqueados.has(normalizar(nombreCrudo))) return null;
+  return nombreCrudo;
 }
 
 function mapearAgente(
@@ -251,6 +256,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (nombre) aliasToAgente.set(row.alias_normalizado, nombre);
     }
 
+    // Nombres a ignorar SIEMPRE para esta empresa (ver tabla
+    // agente_bloqueado) - gente que ya no trabaja mas pero cuyo nombre
+    // sigue en el sheet: sin esto, el respaldo por director (mas abajo) los
+    // volveria a traer solos en cada corrida, tratandolos como "agente
+    // nuevo".
+    const { data: bloqueadosRows, error: bloqueadosError } = await supabase
+      .from("agente_bloqueado")
+      .select("nombre_normalizado")
+      .eq("empresa_id", empresaId);
+    if (bloqueadosError) throw new Error(`Error leyendo agentes bloqueados: ${bloqueadosError.message}`);
+    const nombresBloqueados = new Set((bloqueadosRows ?? []).map((r) => r.nombre_normalizado as string));
+
     // Segunda barrera contra duplicados, independiente del ID calculado: se
     // arma una firma de negocio (agente+producto+monto+fecha+correo) por
     // cada venta YA guardada. Si el ID calculado para una fila cambia por
@@ -366,7 +383,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // respaldo de director), vale la pena saberlo - significa que se
         // esta perdiendo una venta real por falta de fecha.
         const agenteConocido = resolverAgente(
-          agenteSheet, directorFilaRaw, agentesActivos, emailToAgente, aliasToAgente, directorFiltroEmails
+          agenteSheet, directorFilaRaw, agentesActivos, emailToAgente, aliasToAgente, directorFiltroEmails, nombresBloqueados
         );
         if (agenteConocido) {
           sinFechaConocidos.push({ agente: agenteConocido, cliente, producto, fechaCruda });
@@ -375,7 +392,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       const agente = resolverAgente(
-        agenteSheet, directorFilaRaw, agentesActivos, emailToAgente, aliasToAgente, directorFiltroEmails
+        agenteSheet, directorFilaRaw, agentesActivos, emailToAgente, aliasToAgente, directorFiltroEmails, nombresBloqueados
       );
       if (!agente) {
         // Sin filtro por director: nombre realmente no reconocido, vale la

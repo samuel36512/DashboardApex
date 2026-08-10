@@ -178,3 +178,19 @@ create table if not exists agente_alias (
 );
 create index if not exists idx_agente_alias_empresa on agente_alias (empresa_id);
 alter table agente_alias enable row level security;
+
+-- Nombres del sheet que ventas-sync debe ignorar SIEMPRE para esta empresa,
+-- aunque el respaldo por director (ventas_director_emails) los reconoceria
+-- como "agente nuevo". Pensado para gente que ya no trabaja mas con el
+-- director pero cuyo nombre sigue apareciendo en filas viejas/nuevas del
+-- sheet compartido - sin esto, el respaldo los volveria a traer solos en
+-- cada sincronizacion.
+create table if not exists agente_bloqueado (
+  id bigint generated always as identity primary key,
+  empresa_id bigint not null references empresas(id),
+  nombre_normalizado text not null,
+  creado_en timestamptz not null default now(),
+  unique (empresa_id, nombre_normalizado)
+);
+create index if not exists idx_agente_bloqueado_empresa on agente_bloqueado (empresa_id);
+alter table agente_bloqueado enable row level security;
