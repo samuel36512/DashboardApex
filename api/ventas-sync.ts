@@ -246,14 +246,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // adivinar.
     const { data: aliasRows, error: aliasRowsError } = await supabase
       .from("agente_alias")
-      .select("alias_normalizado, agentes(nombre)")
+      .select("alias_normalizado, agentes(nombre, activo)")
       .eq("empresa_id", empresaId);
     if (aliasRowsError) throw new Error(`Error leyendo alias de agentes: ${aliasRowsError.message}`);
     const aliasToAgente = new Map<string, string>();
     for (const row of aliasRows ?? []) {
       const agenteRel = (row as any).agentes;
-      const nombre: string | undefined = Array.isArray(agenteRel) ? agenteRel[0]?.nombre : agenteRel?.nombre;
-      if (nombre) aliasToAgente.set(row.alias_normalizado, nombre);
+      const agenteObj = Array.isArray(agenteRel) ? agenteRel[0] : agenteRel;
+      // Un agente desactivado no debe volver a resolverse por ningun
+      // camino, ni siquiera por un alias viejo que todavia apunte a el -
+      // si no, desactivarlo (ej. porque ya no trabaja mas) no alcanza para
+      // que deje de aparecer.
+      if (agenteObj?.nombre && agenteObj?.activo) aliasToAgente.set(row.alias_normalizado, agenteObj.nombre);
     }
 
     // Nombres a ignorar SIEMPRE para esta empresa (ver tabla
