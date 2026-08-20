@@ -4,6 +4,7 @@ import { getSupabase } from "./_lib/supabase";
 import { tasaDiariaCOP } from "./_lib/agentTier";
 import { getDiasActivosPautaMes } from "./_lib/pautaEstado";
 import { getAccessToken, getEmpresaOverride, requireDirector } from "./_lib/auth";
+import { MESES_TAB, leerVentasDelSheet } from "./_lib/ventasSheet";
 
 // Los endpoints de /api/admin/* se consolidaron en un solo archivo (con un
 // dispatcher por ?accion=) porque el plan gratuito de Vercel tiene un
@@ -292,6 +293,172 @@ async function handleAbonos(req: VercelRequest, res: VercelResponse) {
   return res.status(200).json({ ok: true, montoUSD, cantidad, actualizadoEn });
 }
 
+// Compara, fila por fila, lo que dice el sheet AHORA MISMO contra lo que ya
+// esta guardado en la base para el mes elegido - para encontrar filas que
+// quedaron guardadas pero que ya no corresponden a nada real en el sheet
+// (ej. un monto que se corrigio y dejo la version vieja huerfana). Usa
+// EXACTAMENTE la misma logica de lectura/resolucion que ventas-sync.ts (via
+// leerVentasDelSheet), asi el resultado siempre es consistente con lo que
+// haria una sincronizacion real. Solo lee - no guarda ni borra nada.
+async function handleConciliar(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "GET") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  const supabase = getSupabase();
+  const auth = await requireDirector(supabase, getAccessToken(req), { empresaOverride: getEmpresaOverride(req) });
+  if (!auth.ok) {
+    return res.status(auth.status).json({ error: auth.error });
+  }
+  const { empresaId } = auth.ctx;
+
+  const { data: empresaRow, error: empresaError } = await supabase
+    .from("empresas")
+    .select("ventas_sheet_id, ventas_director_emails")
+    .eq("id", empresaId)
+    .maybeSingle();
+  if (empresaError || !empresaRow?.ventas_sheet_id) {
+    return res.status(500).json({ error: "Esta empresa no tiene ventas_sheet_id configurado" });
+  }
+  const sheetId = empresaRow.ventas_sheet_id as string;
+  const directorFiltroEmails = new Set(
+    ((empresaRow.ventas_director_emails as string[] | null) ?? []).map((e) => e.toLowerCase())
+  );
+
+  const credsJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+  if (!credsJson) {
+    return res.status(500).json({ error: "Falta GOOGLE_SERVICE_ACCOUNT_JSON en Vercel" });
+  }
+
+  const mesParam = typeof req.query.mes === "string" ? req.query.mes.trim() : "";
+  const mesMatch = /^(\d{4})-(\d{2})$/.exec(mesParam);
+  const ahoraCo = new Date(Date.now() - 5 * 60 * 60 * 1000);
+  const anioSel = mesMatch ? Number(mesMatch[1]) : ahoraCo.getUTCFullYear();
+  const mesSelIdx = mesMatch ? Number(mesMatch[2]) - 1 : ahoraCo.getUTCMonth();
+  const tabName = `${MESES_TAB[mesSelIdx]} ventas plataforma`;
+  const desdeMesCo = new Date(Date.UTC(anioSel, mesSelIdx, 1, 5, 0, 0)).toISOString();
+  const hastaMesCo = new Date(Date.UTC(anioSel, mesSelIdx + 1, 1, 5, 0, 0)).toISOString();
+
+  const { data: agentesRows, error: agentesError } = await supabase
+    .from("agentes")
+    .select("nombre, email_personal")
+    .eq("activo", true)
+    .eq("empresa_id", empresaId);
+  if (agentesError) return res.status(500).json({ error: "Error leyendo agentes" });
+  const agentesActivos = (agentesRows ?? []).map((a) => a.nombre);
+  const emailToAgente = new Map<string, string>();
+  for (const a of agentesRows ?? []) {
+    if (a.email_personal) emailToAgente.set(String(a.email_personal).toLowerCase(), a.nombre);
+  }
+
+  const { data: aliasRows, error: aliasError } = await supabase
+    .from("agente_alias")
+    .select("alias_normalizado, agentes(nombre, activo)")
+    .eq("empresa_id", empresaId);
+  if (aliasError) return res.status(500).json({ error: "Error leyendo alias" });
+  const aliasToAgente = new Map<string, string>();
+  for (const row of aliasRows ?? []) {
+    const agenteRel = (row as any).agentes;
+    const agenteObj = Array.isArray(agenteRel) ? agenteRel[0] : agenteRel;
+    if (agenteObj?.nombre && agenteObj?.activo) aliasToAgente.set(row.alias_normalizado, agenteObj.nombre);
+  }
+
+  const { data: bloqueadosRows, error: bloqueadosError } = await supabase
+    .from("agente_bloqueado")
+    .select("nombre_normalizado")
+    .eq("empresa_id", empresaId);
+  if (bloqueadosError) return res.status(500).json({ error: "Error leyendo bloqueados" });
+  const nombresBloqueados = new Set((bloqueadosRows ?? []).map((r) => r.nombre_normalizado as string));
+
+  let lectura;
+  try {
+    lectura = await leerVentasDelSheet({
+      sheetId, credsJson, tabName, agentesActivos, emailToAgente, aliasToAgente, directorFiltroEmails, nombresBloqueados,
+    });
+  } catch (err: any) {
+    return res.status(502).json({ error: err?.message || "Error leyendo el sheet" });
+  }
+
+  const { data: dbRows, error: dbError } = await supabase
+    .from("eventos")
+    .select("id, agente, contacto_id, contacto_nombre, monto, fecha")
+    .eq("empresa_id", empresaId)
+    .eq("tipo", "venta")
+    .gte("fecha", desdeMesCo)
+    .lt("fecha", hastaMesCo);
+  if (dbError) return res.status(500).json({ error: "Error leyendo ventas guardadas: " + dbError.message });
+
+  const idsEnSheet = new Set(lectura.rows.map((r) => r.contacto_id));
+  const idsEnDb = new Set((dbRows ?? []).map((r) => r.contacto_id));
+
+  const sobrantes = (dbRows ?? [])
+    .filter((r) => !idsEnSheet.has(r.contacto_id))
+    .map((r) => ({
+      id: r.id,
+      agente: r.agente,
+      cliente: r.contacto_nombre,
+      montoUSD: Number(r.monto),
+      fecha: r.fecha,
+    }))
+    .sort((a, b) => b.montoUSD - a.montoUSD);
+
+  const faltantes = lectura.rows
+    .filter((r) => !idsEnDb.has(r.contacto_id))
+    .map((r) => ({ agente: r.agente, cliente: r.contacto_nombre, montoUSD: r.monto, fecha: r.fecha }));
+
+  const totalSheetUSD = lectura.rows.reduce((acc, r) => acc + r.monto, 0);
+  const totalDbUSD = (dbRows ?? []).reduce((acc, r) => acc + Number(r.monto), 0);
+
+  res.setHeader("Cache-Control", "no-store");
+  return res.status(200).json({
+    ok: true,
+    mes: `${anioSel}-${String(mesSelIdx + 1).padStart(2, "0")}`,
+    pestana: tabName,
+    totalSheetUSD: Math.round(totalSheetUSD * 100) / 100,
+    totalDbUSD: Math.round(totalDbUSD * 100) / 100,
+    diferenciaUSD: Math.round((totalDbUSD - totalSheetUSD) * 100) / 100,
+    cantidadSheet: lectura.rows.length,
+    cantidadDb: (dbRows ?? []).length,
+    sobrantes,
+    faltantes,
+  });
+}
+
+// Borra UNA venta puntual por id, siempre scopeada a la empresa del que
+// llama (nunca se confia en un empresaId mandado por el cliente) - pensado
+// para que el panel de conciliacion pueda borrar una fila "sobrante" con un
+// click, sin tener que ir a Supabase a mano.
+async function handleEliminarVenta(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  const supabase = getSupabase();
+  const auth = await requireDirector(supabase, getAccessToken(req), { empresaOverride: getEmpresaOverride(req) });
+  if (!auth.ok) {
+    return res.status(auth.status).json({ error: auth.error });
+  }
+  const { empresaId } = auth.ctx;
+
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const id = Number(body.id);
+  if (!Number.isFinite(id) || id <= 0) {
+    return res.status(400).json({ error: "Falta el id de la venta" });
+  }
+
+  const { error, count } = await supabase
+    .from("eventos")
+    .delete({ count: "exact" })
+    .eq("id", id)
+    .eq("empresa_id", empresaId)
+    .eq("tipo", "venta");
+  if (error) {
+    return res.status(500).json({ error: "Error borrando la venta: " + error.message });
+  }
+  if (!count) {
+    return res.status(404).json({ error: "No se encontró esa venta en tu oficina" });
+  }
+  return res.status(200).json({ ok: true, id });
+}
+
 async function requireSuperadmin(
   req: VercelRequest,
   res: VercelResponse,
@@ -517,6 +684,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return handleCrearLoginAgente(req, res);
     case "abonos":
       return handleAbonos(req, res);
+    case "conciliar":
+      return handleConciliar(req, res);
+    case "eliminar-venta":
+      return handleEliminarVenta(req, res);
     case "empresas":
       return handleEmpresas(req, res);
     case "global":

@@ -2261,11 +2261,12 @@
       veMesSelect,
     ]));
 
-    if (esRolDirector(data.rol) && mostrarAbonos) {
-      content.appendChild(el("div", { class: "abonos-toggle-row" }, [
-        el("button", { class: "btn", id: "abonos-btn", text: "Abonos" }),
-      ]));
-      content.appendChild(el("div", { id: "abonos-panel", class: "abono-panel hidden" }));
+    if (esRolDirector(data.rol)) {
+      var toggleBtns = [el("button", { class: "btn", id: "conciliar-btn", text: "Conciliar con el sheet" })];
+      if (mostrarAbonos) toggleBtns.push(el("button", { class: "btn", id: "abonos-btn", text: "Abonos" }));
+      content.appendChild(el("div", { class: "abonos-toggle-row" }, toggleBtns));
+      content.appendChild(el("div", { id: "conciliar-panel", class: "abono-panel hidden" }));
+      if (mostrarAbonos) content.appendChild(el("div", { id: "abonos-panel", class: "abono-panel hidden" }));
     }
 
     content.appendChild(el("div", { class: "hero-stat-grid" }, [
@@ -2309,7 +2310,10 @@
         el("div", { class: "big", text: "Todavía no hay ventas registradas" }),
       ]));
       renderContentState(content);
-      if (esRolDirector(data.rol) && mostrarAbonos) wireAbonosPanel(data, abonosMontoUSD, abonosCantidad);
+      if (esRolDirector(data.rol)) {
+        wireConciliarPanel();
+        if (mostrarAbonos) wireAbonosPanel(data, abonosMontoUSD, abonosCantidad);
+      }
       return;
     }
 
@@ -2330,8 +2334,125 @@
     document.getElementById("updated-label").textContent =
       "Actualizado " + new Date(data.actualizado || Date.now()).toLocaleTimeString("es-419", { hour: "2-digit", minute: "2-digit" });
 
-    if (esRolDirector(data.rol) && mostrarAbonos) wireAbonosPanel(data, abonosMontoUSD, abonosCantidad);
+    if (esRolDirector(data.rol)) {
+      wireConciliarPanel();
+      if (mostrarAbonos) wireAbonosPanel(data, abonosMontoUSD, abonosCantidad);
+    }
     cargarVentasDetalle();
+  }
+
+  var conciliarPanelOpen = false;
+
+  // Compara el sheet contra la base y muestra las filas "sobrantes" (que
+  // quedaron guardadas pero ya no corresponden a nada real en el sheet, ej.
+  // un monto corregido que dejo la version vieja huerfana) con un boton para
+  // borrarlas ahi mismo, sin tener que ir a Supabase a mano.
+  function wireConciliarPanel() {
+    var btn = document.getElementById("conciliar-btn");
+    var panel = document.getElementById("conciliar-panel");
+    if (!btn || !panel) return;
+
+    function cargar() {
+      panel.innerHTML = "";
+      panel.appendChild(el("div", { class: "section-title", text: "Conciliación con el sheet" }));
+      panel.appendChild(el("div", { class: "section-desc", text: "Leyendo el sheet y comparando contra lo guardado…" }));
+      var qs = currentVentasEquipoMes ? "&mes=" + encodeURIComponent(currentVentasEquipoMes) : "";
+      fetch(adminUrl("conciliar") + qs, { headers: { Authorization: "Bearer " + currentAccessToken } })
+        .then(function (res) {
+          return res.json().then(function (body) { return { status: res.status, body: body }; });
+        })
+        .then(function (r) {
+          panel.innerHTML = "";
+          panel.appendChild(el("div", { class: "section-title", text: "Conciliación con el sheet (" + r.body.pestana + ")" }));
+          if (r.status !== 200) {
+            panel.appendChild(el("div", { class: "section-desc", text: r.body.error || "No se pudo conciliar" }));
+            return;
+          }
+          var diff = r.body.diferenciaUSD || 0;
+          panel.appendChild(el("div", {
+            class: "section-desc",
+            text: "Sheet: " + currency.format(r.body.totalSheetUSD) + " (" + r.body.cantidadSheet + ") · Plataforma: " +
+              currency.format(r.body.totalDbUSD) + " (" + r.body.cantidadDb + ") · Diferencia: " + currency.format(diff),
+          }));
+
+          if (r.body.sobrantes.length === 0) {
+            panel.appendChild(el("div", { class: "section-desc", text: "✓ No hay filas sobrantes — todo coincide." }));
+          } else {
+            var wrap = el("div", { class: "venta-table-wrap" });
+            var table = el("div", { class: "venta-table" });
+            table.appendChild(el("div", { class: "venta-row header" }, [
+              el("div", { text: "Cliente" }),
+              el("div", { text: "Agente" }),
+              el("div", { text: "Monto" }),
+              el("div", { text: "Fecha" }),
+              el("div", { text: "" }),
+            ]));
+            r.body.sobrantes.forEach(function (s) {
+              var msg = el("span", { class: "admin-msg" });
+              var delBtn = el("button", { class: "btn", text: "Eliminar" });
+              delBtn.addEventListener("click", function () {
+                if (!confirm("¿Borrar la venta de " + s.cliente.split("\n")[0] + " por " + currency.format(s.montoUSD) + "? No está en el sheet.")) return;
+                delBtn.disabled = true;
+                delBtn.textContent = "Borrando…";
+                fetch(adminUrl("eliminar-venta"), {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", Authorization: "Bearer " + currentAccessToken },
+                  body: JSON.stringify({ id: s.id }),
+                })
+                  .then(function (res) { return res.json().then(function (b) { return { status: res.status, body: b }; }); })
+                  .then(function (r2) {
+                    if (r2.status !== 200) {
+                      msg.textContent = r2.body.error || "No se pudo borrar";
+                      delBtn.disabled = false;
+                      delBtn.textContent = "Eliminar";
+                      return;
+                    }
+                    msg.textContent = "Borrada.";
+                    delBtn.remove();
+                    loadMetrics(true, currentAccessToken);
+                  })
+                  .catch(function () {
+                    msg.textContent = "Error de red.";
+                    delBtn.disabled = false;
+                    delBtn.textContent = "Eliminar";
+                  });
+              });
+              table.appendChild(el("div", { class: "venta-row" }, [
+                el("div", { class: "venta-cliente", text: s.cliente.split("\n")[0], title: s.cliente }),
+                el("div", { text: s.agente }),
+                el("div", { class: "venta-monto", text: currencyPrecise.format(s.montoUSD) }),
+                el("div", { class: "venta-fecha", text: fmtFechaHora(s.fecha) }),
+                el("div", {}, [delBtn, msg]),
+              ]));
+            });
+            wrap.appendChild(table);
+            panel.appendChild(wrap);
+            panel.appendChild(el("div", {
+              class: "section-desc",
+              text: "Antes de borrar, confirmá en el sheet que esa venta realmente no debería estar (podría ser una segunda compra real del mismo cliente).",
+            }));
+          }
+
+          if (r.body.faltantes && r.body.faltantes.length > 0) {
+            panel.appendChild(el("div", {
+              class: "section-desc",
+              text: r.body.faltantes.length + " fila(s) del sheet todavía no están guardadas — se van a agregar solas en la próxima sincronización.",
+            }));
+          }
+        })
+        .catch(function () {
+          panel.innerHTML = "";
+          panel.appendChild(el("div", { class: "section-title", text: "Conciliación con el sheet" }));
+          panel.appendChild(el("div", { class: "section-desc", text: "Error de red, probá de nuevo." }));
+        });
+    }
+
+    btn.addEventListener("click", function () {
+      conciliarPanelOpen = !conciliarPanelOpen;
+      panel.classList.toggle("hidden", !conciliarPanelOpen);
+      if (conciliarPanelOpen) cargar();
+    });
+    panel.classList.toggle("hidden", !conciliarPanelOpen);
   }
 
   var abonosPanelOpen = false;
