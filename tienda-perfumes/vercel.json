@@ -1,0 +1,13 @@
+{
+  "rewrites": [
+    { "source": "/productos", "destination": "/api/productos" },
+    { "source": "/checkout", "destination": "/api/checkout" },
+    { "source": "/webhook/mercadopago", "destination": "/api/webhook/mercadopago" },
+    { "source": "/admin/productos", "destination": "/api/admin/productos" },
+    { "source": "/admin/pedidos", "destination": "/api/admin/pedidos" }
+  ],
+  "functions": {
+    "api/checkout.ts": { "maxDuration": 30 },
+    "api/webhook/mercadopago.ts": { "maxDuration": 30 }
+  }
+}

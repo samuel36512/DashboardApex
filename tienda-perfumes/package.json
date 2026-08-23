@@ -1,0 +1,20 @@
+{
+  "name": "tienda-perfumes",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "npx vercel dev",
+    "deploy": "npx vercel deploy --prod",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "mercadopago": "^2.0.15",
+    "resend": "^4.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@vercel/node": "^3.2.0",
+    "typescript": "^5.6.3"
+  }
+}

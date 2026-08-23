@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tienda de Perfumes</title>
+<style>
+  :root {
+    --bg: #0f0d10;
+    --panel: #1a1519;
+    --panel-2: #221b21;
+    --gold: #c9a15a;
+    --gold-dim: #8a7141;
+    --text: #f2ece2;
+    --text-dim: #b8aea0;
+    --border: #332a2e;
+    --danger: #d16060;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Georgia", "Times New Roman", serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    padding: 28px 20px 22px;
+    text-align: center;
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 {
+    margin: 0;
+    letter-spacing: 0.14em;
+    font-weight: 400;
+    font-size: 1.7rem;
+    text-transform: uppercase;
+    color: var(--gold);
+  }
+  header p { margin: 6px 0 0; color: var(--text-dim); font-size: 0.9rem; }
+
+  main { max-width: 1080px; margin: 0 auto; padding: 32px 20px 80px; }
+
+  #grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+    gap: 22px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .card img {
+    width: 100%;
+    aspect-ratio: 3 / 4;
+    object-fit: cover;
+    background: var(--panel-2);
+  }
+  .card .info { padding: 16px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+  .card .marca { font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--gold-dim); }
+  .card .nombre { font-size: 1.05rem; }
+  .card .descripcion { font-size: 0.85rem; color: var(--text-dim); flex: 1; }
+  .card .precio { font-size: 1.15rem; color: var(--gold); margin-top: 4px; }
+  .card button {
+    margin: 0 16px 16px;
+    padding: 10px;
+    background: transparent;
+    border: 1px solid var(--gold-dim);
+    color: var(--gold);
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: inherit;
+    letter-spacing: 0.05em;
+  }
+  .card button:hover { background: var(--gold); color: #1a1319; }
+
+  #vacio, #cargando { color: var(--text-dim); text-align: center; padding: 40px 0; }
+
+  #cart-btn {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    background: var(--gold);
+    color: #1a1319;
+    border: none;
+    border-radius: 999px;
+    padding: 14px 20px;
+    font-family: inherit;
+    font-weight: bold;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.4);
+  }
+
+  .overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    z-index: 10;
+  }
+  .overlay.open { display: flex; }
+  .modal {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    width: 100%;
+    max-width: 460px;
+    max-height: 88vh;
+    overflow-y: auto;
+    padding: 24px;
+  }
+  .modal h2 { margin-top: 0; color: var(--gold); font-weight: 400; letter-spacing: 0.05em; }
+  .modal-close {
+    float: right;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-size: 1.3rem;
+    cursor: pointer;
+  }
+
+  .cart-item { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .cart-item .nombre { flex: 1; font-size: 0.92rem; }
+  .cart-item .cant { display: flex; align-items: center; gap: 6px; }
+  .cart-item button.qty { width: 26px; height: 26px; border-radius: 5px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); cursor: pointer; }
+  .cart-total { display: flex; justify-content: space-between; padding-top: 14px; font-size: 1.1rem; color: var(--gold); }
+
+  form.checkout { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+  form.checkout input {
+    padding: 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    color: var(--text);
+    font-family: inherit;
+  }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .checkout-submit {
+    margin-top: 6px;
+    padding: 12px;
+    background: var(--gold);
+    color: #1a1319;
+    border: none;
+    border-radius: 6px;
+    font-weight: bold;
+    cursor: pointer;
+    letter-spacing: 0.04em;
+  }
+  .checkout-submit:disabled { opacity: 0.6; cursor: not-allowed; }
+  .error-msg { color: var(--danger); font-size: 0.85rem; min-height: 1.2em; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Maison de Parfum</h1>
+  <p>Fragancias originales — pago seguro con Mercado Pago</p>
+</header>
+
+<main>
+  <div id="cargando">Cargando catálogo…</div>
+  <div id="vacio" style="display:none">Todavía no hay productos cargados.</div>
+  <div id="grid"></div>
+</main>
+
+<button id="cart-btn" onclick="abrirCarrito()">🛍️ Carrito (<span id="cart-count">0</span>)</button>
+
+<div class="overlay" id="cart-overlay">
+  <div class="modal">
+    <button class="modal-close" onclick="cerrarCarrito()">×</button>
+    <h2>Tu carrito</h2>
+    <div id="cart-items"></div>
+    <div class="cart-total"><span>Total</span><span id="cart-total">$0</span></div>
+
+    <form class="checkout" id="checkout-form" onsubmit="return enviarCheckout(event)">
+      <input name="nombre" placeholder="Nombre y apellido" required />
+      <input name="email" type="email" placeholder="Email" required />
+      <input name="telefono" placeholder="Teléfono" />
+      <input name="calle" placeholder="Calle y número" required />
+      <div class="row2">
+        <input name="ciudad" placeholder="Ciudad" required />
+        <input name="provincia" placeholder="Provincia" required />
+      </div>
+      <div class="row2">
+        <input name="cp" placeholder="Código postal" required />
+        <input name="pais" placeholder="País" value="Argentina" required />
+      </div>
+      <div class="error-msg" id="checkout-error"></div>
+      <button class="checkout-submit" id="checkout-submit" type="submit">Pagar con Mercado Pago</button>
+    </form>
+  </div>
+</div>
+
+<script>
+  let productos = [];
+  let carrito = JSON.parse(localStorage.getItem("carrito") || "{}"); // { [producto_id]: cantidad }
+
+  function guardarCarrito() {
+    localStorage.setItem("carrito", JSON.stringify(carrito));
+    renderCarritoBadge();
+  }
+
+  function renderCarritoBadge() {
+    const total = Object.values(carrito).reduce((a, b) => a + b, 0);
+    document.getElementById("cart-count").textContent = total;
+  }
+
+  async function cargarProductos() {
+    try {
+      const r = await fetch("/productos");
+      const data = await r.json();
+      productos = data.productos || [];
+      document.getElementById("cargando").style.display = "none";
+      if (productos.length === 0) {
+        document.getElementById("vacio").style.display = "block";
+        return;
+      }
+      const grid = document.getElementById("grid");
+      grid.innerHTML = productos.map(p => `
+        <div class="card">
+          <img src="${p.imagen_url || 'https://placehold.co/400x530/1a1519/c9a15a?text=Perfume'}" alt="${p.nombre}" loading="lazy" />
+          <div class="info">
+            <div class="marca">${p.marca || ""}</div>
+            <div class="nombre">${p.nombre}</div>
+            <div class="descripcion">${p.descripcion || ""}</div>
+            <div class="precio">$${Number(p.precio).toLocaleString("es-AR")}</div>
+          </div>
+          <button onclick="agregarAlCarrito(${p.id})">Agregar al carrito</button>
+        </div>
+      `).join("");
+    } catch (e) {
+      document.getElementById("cargando").textContent = "No se pudo cargar el catálogo. Probá recargar la página.";
+    }
+  }
+
+  function agregarAlCarrito(id) {
+    carrito[id] = (carrito[id] || 0) + 1;
+    guardarCarrito();
+    abrirCarrito();
+  }
+
+  function cambiarCantidad(id, delta) {
+    carrito[id] = (carrito[id] || 0) + delta;
+    if (carrito[id] <= 0) delete carrito[id];
+    guardarCarrito();
+    renderCarrito();
+  }
+
+  function renderCarrito() {
+    const cont = document.getElementById("cart-items");
+    const ids = Object.keys(carrito);
+    if (ids.length === 0) {
+      cont.innerHTML = "<p style='color:var(--text-dim)'>Tu carrito está vacío.</p>";
+      document.getElementById("cart-total").textContent = "$0";
+      return;
+    }
+    let total = 0;
+    cont.innerHTML = ids.map(id => {
+      const p = productos.find(x => x.id === Number(id));
+      if (!p) return "";
+      const cant = carrito[id];
+      total += p.precio * cant;
+      return `
+        <div class="cart-item">
+          <div class="nombre">${p.nombre}<br><small>$${Number(p.precio).toLocaleString("es-AR")} c/u</small></div>
+          <div class="cant">
+            <button class="qty" onclick="cambiarCantidad(${id}, -1)">−</button>
+            <span>${cant}</span>
+            <button class="qty" onclick="cambiarCantidad(${id}, 1)">+</button>
+          </div>
+        </div>`;
+    }).join("");
+    document.getElementById("cart-total").textContent = "$" + total.toLocaleString("es-AR");
+  }
+
+  function abrirCarrito() {
+    renderCarrito();
+    document.getElementById("cart-overlay").classList.add("open");
+  }
+  function cerrarCarrito() {
+    document.getElementById("cart-overlay").classList.remove("open");
+  }
+
+  async function enviarCheckout(ev) {
+    ev.preventDefault();
+    const errorEl = document.getElementById("checkout-error");
+    errorEl.textContent = "";
+
+    const ids = Object.keys(carrito);
+    if (ids.length === 0) {
+      errorEl.textContent = "Agregá al menos un producto al carrito.";
+      return false;
+    }
+
+    const form = ev.target;
+    const btn = document.getElementById("checkout-submit");
+    btn.disabled = true;
+    btn.textContent = "Redirigiendo a Mercado Pago…";
+
+    const payload = {
+      cliente: {
+        nombre: form.nombre.value,
+        email: form.email.value,
+        telefono: form.telefono.value,
+        direccion: {
+          calle: form.calle.value,
+          ciudad: form.ciudad.value,
+          provincia: form.provincia.value,
+          cp: form.cp.value,
+          pais: form.pais.value,
+        },
+      },
+      items: ids.map(id => ({ producto_id: Number(id), cantidad: carrito[id] })),
+    };
+
+    try {
+      const r = await fetch("/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        errorEl.textContent = data.error || "No se pudo iniciar el pago.";
+        btn.disabled = false;
+        btn.textContent = "Pagar con Mercado Pago";
+        return false;
+      }
+      localStorage.removeItem("carrito");
+      window.location.href = data.init_point;
+    } catch (e) {
+      errorEl.textContent = "Error de conexión. Probá de nuevo.";
+      btn.disabled = false;
+      btn.textContent = "Pagar con Mercado Pago";
+    }
+    return false;
+  }
+
+  renderCarritoBadge();
+  cargarProductos();
+</script>
+</body>
+</html>

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tu pedido</title>
+<style>
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: "Georgia", serif;
+    background: #0f0d10;
+    color: #f2ece2;
+    text-align: center;
+    padding: 20px;
+  }
+  .box { max-width: 440px; }
+  h1 { color: #c9a15a; font-weight: 400; letter-spacing: 0.05em; }
+  a { color: #c9a15a; }
+  .estado { font-size: 0.9rem; color: #b8aea0; margin-top: 10px; }
+</style>
+</head>
+<body>
+  <div class="box">
+    <h1 id="titulo">Procesando tu pedido…</h1>
+    <p id="mensaje">Estamos confirmando el pago con Mercado Pago.</p>
+    <p class="estado" id="detalle"></p>
+    <p><a href="/">Volver a la tienda</a></p>
+  </div>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const pedido = params.get("pedido");
+    const estado = params.get("collection_status") || params.get("status");
+
+    const titulo = document.getElementById("titulo");
+    const mensaje = document.getElementById("mensaje");
+    const detalle = document.getElementById("detalle");
+
+    if (estado === "approved") {
+      titulo.textContent = "¡Gracias por tu compra!";
+      mensaje.textContent = "Tu pago fue aprobado. Te enviamos un email con el detalle del pedido.";
+    } else if (estado === "pending" || estado === "in_process") {
+      titulo.textContent = "Pago en revisión";
+      mensaje.textContent = "Tu pago está siendo procesado. Te avisamos por email apenas se confirme.";
+    } else if (estado === "rejected") {
+      titulo.textContent = "El pago no se pudo procesar";
+      mensaje.textContent = "Podés volver a intentarlo desde la tienda.";
+    }
+
+    if (pedido) detalle.textContent = "Pedido #" + pedido;
+  </script>
+</body>
+</html>
