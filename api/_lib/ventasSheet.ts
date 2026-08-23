@@ -1,4 +1,7 @@
 import crypto from "node:crypto";
+import type { getSupabase } from "./supabase";
+
+type Supabase = ReturnType<typeof getSupabase>;
 
 export const MESES_TAB = [
   "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -273,4 +276,175 @@ export async function leerVentasDelSheet(opts: {
     sinFechaConocidos,
     colisionesMismaCorrida,
   };
+}
+
+export interface ResultadoSyncVentas {
+  ok: true;
+  pestana: string;
+  filasLeidas: number;
+  ventasGuardadas: number;
+  duplicadosEvitados: number;
+  colisionesDetectadas: { contactoId: string; cliente: string; agente: string }[];
+  sinFecha: number;
+  sinFechaDeMiEquipo: { agente: string; cliente: string; producto: string; fechaCruda: string }[];
+  agentesNoReconocidos: string[];
+  muestra: { cliente: string; agente: string; producto: string; fecha: string }[];
+}
+
+const LOCK_KEY = "ventas_sync_lock";
+const LOCK_VIGENCIA_MS = 4 * 60 * 1000;
+
+// Sincronizacion completa (leer el sheet + guardar en eventos) para una
+// empresa, con el mismo candado/barrera-de-firma/upsert que usaba
+// ventas-sync.ts - centralizado aca para que el cron (webhook_secret) y el
+// boton "Ventas en tiempo real" del dashboard (sesion de director) disparen
+// EXACTAMENTE el mismo codigo, sin dos copias que puedan desincronizarse.
+export async function sincronizarVentasEmpresa(
+  supabase: Supabase,
+  empresaId: number,
+  sheetId: string,
+  ventasDirectorEmails: string[],
+  credsJson: string,
+  mesParam?: string
+): Promise<ResultadoSyncVentas> {
+  const { data: candadoRow } = await supabase
+    .from("sync_state")
+    .select("value")
+    .eq("empresa_id", empresaId)
+    .eq("key", LOCK_KEY)
+    .maybeSingle();
+  const candadoDesde = candadoRow?.value ? new Date(candadoRow.value as string).getTime() : 0;
+  if (candadoDesde && Date.now() - candadoDesde >= LOCK_VIGENCIA_MS) {
+    await supabase.from("sync_state").delete().eq("empresa_id", empresaId).eq("key", LOCK_KEY);
+  }
+  const { error: candadoError } = await supabase
+    .from("sync_state")
+    .insert({ key: LOCK_KEY, value: new Date().toISOString(), empresa_id: empresaId });
+  if (candadoError) {
+    if (candadoError.code === "23505") {
+      throw new Error("Ya hay una sincronizacion de ventas en curso, esperá un momento y volvé a intentar.");
+    }
+    throw new Error("Error tomando el candado de sincronizacion: " + candadoError.message);
+  }
+
+  try {
+    const { data: agentesRows, error: agentesError } = await supabase
+      .from("agentes")
+      .select("nombre, email_personal")
+      .eq("activo", true)
+      .eq("empresa_id", empresaId);
+    if (agentesError) throw new Error(`Error leyendo agentes: ${agentesError.message}`);
+    const agentesActivos = (agentesRows ?? []).map((a) => a.nombre);
+    const emailToAgente = new Map<string, string>();
+    for (const a of agentesRows ?? []) {
+      if (a.email_personal) emailToAgente.set(String(a.email_personal).toLowerCase(), a.nombre);
+    }
+
+    const { data: aliasRows, error: aliasRowsError } = await supabase
+      .from("agente_alias")
+      .select("alias_normalizado, agentes(nombre, activo)")
+      .eq("empresa_id", empresaId);
+    if (aliasRowsError) throw new Error(`Error leyendo alias de agentes: ${aliasRowsError.message}`);
+    const aliasToAgente = new Map<string, string>();
+    for (const row of aliasRows ?? []) {
+      const agenteRel = (row as any).agentes;
+      const agenteObj = Array.isArray(agenteRel) ? agenteRel[0] : agenteRel;
+      if (agenteObj?.nombre && agenteObj?.activo) aliasToAgente.set(row.alias_normalizado, agenteObj.nombre);
+    }
+
+    const { data: bloqueadosRows, error: bloqueadosError } = await supabase
+      .from("agente_bloqueado")
+      .select("nombre_normalizado")
+      .eq("empresa_id", empresaId);
+    if (bloqueadosError) throw new Error(`Error leyendo agentes bloqueados: ${bloqueadosError.message}`);
+    const nombresBloqueados = new Set((bloqueadosRows ?? []).map((r) => r.nombre_normalizado as string));
+
+    const firmasExistentes = new Map<string, string>();
+    const PAGE_FIRMAS = 1000;
+    for (let offset = 0; ; offset += PAGE_FIRMAS) {
+      const { data: page, error } = await supabase
+        .from("eventos")
+        .select("contacto_id, agente, monto, fecha, contacto_nombre")
+        .eq("tipo", "venta")
+        .eq("empresa_id", empresaId)
+        .range(offset, offset + PAGE_FIRMAS - 1);
+      if (error) throw new Error(`Error leyendo ventas existentes: ${error.message}`);
+      for (const row of page ?? []) {
+        const correo =
+          (row.contacto_nombre || "")
+            .split("\n")
+            .map((s: string) => s.trim())
+            .filter(Boolean)
+            .pop() || "";
+        const firma = `${row.agente}|${Number(row.monto)}|${new Date(row.fecha).toISOString()}|${correo.toLowerCase()}`;
+        firmasExistentes.set(firma, row.contacto_id);
+      }
+      if (!page || page.length < PAGE_FIRMAS) break;
+    }
+
+    const ahora = new Date();
+    const tabName = mesParam
+      ? `${mesParam} ventas plataforma`
+      : `${MESES_TAB[ahora.getMonth()]} ventas plataforma`;
+
+    const directorFiltroEmails = new Set(ventasDirectorEmails);
+
+    const lectura = await leerVentasDelSheet({
+      sheetId, credsJson, tabName, agentesActivos, emailToAgente, aliasToAgente, directorFiltroEmails, nombresBloqueados,
+    });
+
+    let duplicadosEvitados = lectura.colisionesMismaCorrida;
+    const rowsVenta: { contacto_id: string; agente: string; tipo: "venta"; monto: number; comision: number; producto: string; contacto_nombre: string; fecha: string; empresa_id: number }[] = [];
+    for (const r of lectura.rows) {
+      const correo = r.contacto_nombre.split("\n").map((s) => s.trim()).filter(Boolean).pop() || "";
+      const firma = `${r.agente}|${r.monto}|${r.fecha}|${correo.toLowerCase()}`;
+      const idExistente = firmasExistentes.get(firma);
+      if (idExistente && idExistente !== r.contacto_id) {
+        duplicadosEvitados++;
+        continue;
+      }
+      firmasExistentes.set(firma, r.contacto_id);
+      rowsVenta.push({ ...r, tipo: "venta", empresa_id: empresaId });
+    }
+
+    const rowsVentaPorId = new Map<string, (typeof rowsVenta)[number]>();
+    const colisionesDetectadas: { contactoId: string; cliente: string; agente: string }[] = [];
+    for (const r of rowsVenta) {
+      if (rowsVentaPorId.has(r.contacto_id)) {
+        colisionesDetectadas.push({ contactoId: r.contacto_id, cliente: r.contacto_nombre, agente: r.agente });
+      }
+      rowsVentaPorId.set(r.contacto_id, r);
+    }
+    const rowsVentaFinal = Array.from(rowsVentaPorId.values());
+
+    if (rowsVentaFinal.length > 0) {
+      const CHUNK = 500;
+      for (let i = 0; i < rowsVentaFinal.length; i += CHUNK) {
+        const { error } = await supabase
+          .from("eventos")
+          .upsert(rowsVentaFinal.slice(i, i + CHUNK), { onConflict: "empresa_id,contacto_id,tipo" });
+        if (error) throw new Error(`Error guardando ventas: ${error.message}`);
+      }
+    }
+
+    return {
+      ok: true,
+      pestana: lectura.tabName,
+      filasLeidas: lectura.filasLeidas,
+      ventasGuardadas: rowsVentaFinal.length,
+      duplicadosEvitados,
+      colisionesDetectadas,
+      sinFecha: lectura.sinFecha,
+      sinFechaDeMiEquipo: lectura.sinFechaConocidos,
+      agentesNoReconocidos: lectura.noReconocidos,
+      muestra: rowsVentaFinal.slice(0, 3).map((r) => ({
+        cliente: r.contacto_nombre,
+        agente: r.agente,
+        producto: r.producto,
+        fecha: r.fecha,
+      })),
+    };
+  } finally {
+    await supabase.from("sync_state").delete().eq("empresa_id", empresaId).eq("key", LOCK_KEY);
+  }
 }

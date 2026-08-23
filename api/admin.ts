@@ -4,7 +4,7 @@ import { getSupabase } from "./_lib/supabase";
 import { tasaDiariaCOP } from "./_lib/agentTier";
 import { getDiasActivosPautaMes } from "./_lib/pautaEstado";
 import { getAccessToken, getEmpresaOverride, requireDirector } from "./_lib/auth";
-import { MESES_TAB, leerVentasDelSheet } from "./_lib/ventasSheet";
+import { MESES_TAB, leerVentasDelSheet, sincronizarVentasEmpresa } from "./_lib/ventasSheet";
 
 // Los endpoints de /api/admin/* se consolidaron en un solo archivo (con un
 // dispatcher por ?accion=) porque el plan gratuito de Vercel tiene un
@@ -459,6 +459,50 @@ async function handleEliminarVenta(req: VercelRequest, res: VercelResponse) {
   return res.status(200).json({ ok: true, id });
 }
 
+// Dispara una sincronizacion de ventas completa al toque, desde la sesion
+// del director (sin webhook_secret) - para no depender del cron cuando hace
+// falta el dato actualizado ya mismo. Usa exactamente el mismo
+// sincronizarVentasEmpresa que dispara el cron via ventas-sync.ts.
+async function handleSincronizarVentas(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  const supabase = getSupabase();
+  const auth = await requireDirector(supabase, getAccessToken(req), { empresaOverride: getEmpresaOverride(req) });
+  if (!auth.ok) {
+    return res.status(auth.status).json({ error: auth.error });
+  }
+  const { empresaId } = auth.ctx;
+
+  const { data: empresaRow, error: empresaError } = await supabase
+    .from("empresas")
+    .select("ventas_sheet_id, ventas_director_emails")
+    .eq("id", empresaId)
+    .maybeSingle();
+  if (empresaError || !empresaRow?.ventas_sheet_id) {
+    return res.status(500).json({ error: "Esta empresa no tiene ventas_sheet_id configurado" });
+  }
+  const sheetId = empresaRow.ventas_sheet_id as string;
+  const ventasDirectorEmails = ((empresaRow.ventas_director_emails as string[] | null) ?? []).map((e) => e.toLowerCase());
+
+  const credsJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+  if (!credsJson) {
+    return res.status(500).json({ error: "Falta GOOGLE_SERVICE_ACCOUNT_JSON en Vercel" });
+  }
+
+  try {
+    // Siempre el mes en curso - el boton es para traer lo mas reciente, no
+    // para reprocesar meses pasados (eso se hace con ?mes= en la URL del cron).
+    const resultado = await sincronizarVentasEmpresa(supabase, empresaId, sheetId, ventasDirectorEmails, credsJson);
+    res.setHeader("Cache-Control", "no-store");
+    return res.status(200).json(resultado);
+  } catch (err: any) {
+    const mensaje = err?.message || "Error sincronizando ventas";
+    const status = mensaje.startsWith("Ya hay una sincronizacion") ? 409 : 502;
+    return res.status(status).json({ error: mensaje });
+  }
+}
+
 async function requireSuperadmin(
   req: VercelRequest,
   res: VercelResponse,
@@ -688,6 +732,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return handleConciliar(req, res);
     case "eliminar-venta":
       return handleEliminarVenta(req, res);
+    case "sincronizar-ventas":
+      return handleSincronizarVentas(req, res);
     case "empresas":
       return handleEmpresas(req, res);
     case "global":

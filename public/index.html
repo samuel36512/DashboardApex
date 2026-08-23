@@ -103,6 +103,12 @@
   }
   .btn:hover { border-color: var(--series-1); }
   .btn:disabled { opacity: 0.5; cursor: default; }
+  .btn-gold {
+    border-color: rgba(220,174,83,0.5);
+    color: var(--series-1);
+    font-weight: 600;
+  }
+  .btn-gold:hover { background: rgba(220,174,83,0.08); }
 
   .card {
     background: var(--surface-1);
@@ -2262,9 +2268,13 @@
     ]));
 
     if (esRolDirector(data.rol)) {
-      var toggleBtns = [el("button", { class: "btn", id: "conciliar-btn", text: "Conciliar con el sheet" })];
+      var toggleBtns = [
+        el("button", { class: "btn btn-gold", id: "sync-realtime-btn", text: "Ventas tiempo real" }),
+        el("button", { class: "btn", id: "conciliar-btn", text: "Conciliar con el sheet" }),
+      ];
       if (mostrarAbonos) toggleBtns.push(el("button", { class: "btn", id: "abonos-btn", text: "Abonos" }));
       content.appendChild(el("div", { class: "abonos-toggle-row" }, toggleBtns));
+      content.appendChild(el("div", { id: "sync-realtime-msg", class: "admin-msg" }));
       content.appendChild(el("div", { id: "conciliar-panel", class: "abono-panel hidden" }));
       if (mostrarAbonos) content.appendChild(el("div", { id: "abonos-panel", class: "abono-panel hidden" }));
     }
@@ -2312,6 +2322,7 @@
       renderContentState(content);
       if (esRolDirector(data.rol)) {
         wireConciliarPanel();
+        wireSyncRealtimeBtn();
         if (mostrarAbonos) wireAbonosPanel(data, abonosMontoUSD, abonosCantidad);
       }
       return;
@@ -2336,9 +2347,49 @@
 
     if (esRolDirector(data.rol)) {
       wireConciliarPanel();
+        wireSyncRealtimeBtn();
       if (mostrarAbonos) wireAbonosPanel(data, abonosMontoUSD, abonosCantidad);
     }
     cargarVentasDetalle();
+  }
+
+  // Dispara una sincronizacion de ventas al toque, sin depender del cron -
+  // para cuando hace falta el dato actualizado ya mismo.
+  function wireSyncRealtimeBtn() {
+    var btn = document.getElementById("sync-realtime-btn");
+    var msg = document.getElementById("sync-realtime-msg");
+    if (!btn || !msg) return;
+
+    btn.addEventListener("click", function () {
+      btn.disabled = true;
+      btn.textContent = "Sincronizando…";
+      msg.textContent = "";
+      fetch(adminUrl("sincronizar-ventas"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + currentAccessToken },
+      })
+        .then(function (res) {
+          return res.json().then(function (body) { return { status: res.status, body: body }; });
+        })
+        .then(function (r) {
+          btn.disabled = false;
+          btn.textContent = "Ventas tiempo real";
+          if (r.status !== 200) {
+            msg.textContent = r.body.error || "No se pudo sincronizar";
+            return;
+          }
+          msg.textContent = "Listo (" + r.body.pestana + "): " + r.body.ventasGuardadas + " ventas al día" +
+            (r.body.agentesNoReconocidos && r.body.agentesNoReconocidos.length > 0
+              ? " · " + r.body.agentesNoReconocidos.length + " agente(s) sin reconocer"
+              : ".");
+          loadMetrics(true, currentAccessToken);
+        })
+        .catch(function () {
+          btn.disabled = false;
+          btn.textContent = "Ventas tiempo real";
+          msg.textContent = "Error de red, probá de nuevo.";
+        });
+    });
   }
 
   var conciliarPanelOpen = false;
