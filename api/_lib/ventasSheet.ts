@@ -89,9 +89,13 @@ export function parseFechaSheet(s: string): string | null {
   const m = s
     .trim()
     .toLowerCase()
-    .match(/^(\d{1,2})\s+([a-z]{3})\s+(\d{4})(?:\s*,.*)?$/);
+    .match(/^(\d{1,2})\s+([a-z]{3,4})\.?\s+(\d{4})(?:\s*,.*)?$/);
   if (!m) return null;
-  const mes = MESES_FECHA[m[2]];
+  // El sheet a veces abrevia septiembre como "sept" (4 letras) en vez de
+  // "sep" (3, como el resto de los meses) - se recorta a 3 para que
+  // MESES_FECHA lo reconozca igual, sin depender de que la hoja use
+  // siempre la misma abreviatura.
+  const mes = MESES_FECHA[m[2].slice(0, 3)];
   if (mes === undefined) return null;
   return new Date(Date.UTC(Number(m[3]), mes, Number(m[1]), 12, 0, 0)).toISOString();
 }
