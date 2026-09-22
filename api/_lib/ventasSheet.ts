@@ -85,19 +85,28 @@ export function resolverAgente(
   return nombreCrudo;
 }
 
+// La hoja no usa un formato de fecha estable - dentro de la MISMA pestaña
+// aparecen mezclados "1 sept 2026, 09:59" (dia mes-texto anio, separado por
+// espacios), "01/09/2026 9:59" (dia/mes-numero/anio, con barras) y
+// "2/sep/2026 13:50:" (dia/mes-texto/anio, con barras) - probablemente
+// porque distintas personas cargan la fecha escribiendola o pegandola de
+// formas distintas. En vez de exigir un formato exacto, se toman los
+// primeros 3 numeros/palabras (dia, mes, anio) sin importar si el separador
+// es espacio o barra, ni que venga despues (hora, dos puntos, coma) - eso se
+// ignora.
 export function parseFechaSheet(s: string): string | null {
-  const m = s
-    .trim()
-    .toLowerCase()
-    .match(/^(\d{1,2})\s+([a-z]{3,4})\.?\s+(\d{4})(?:\s*,.*)?$/);
+  const texto = s.trim().toLowerCase();
+  const m = texto.match(/^(\d{1,2})[\/\s]+([a-z]{3,4}|\d{1,2})\.?[\/\s]+(\d{4})/);
   if (!m) return null;
-  // El sheet a veces abrevia septiembre como "sept" (4 letras) en vez de
-  // "sep" (3, como el resto de los meses) - se recorta a 3 para que
-  // MESES_FECHA lo reconozca igual, sin depender de que la hoja use
-  // siempre la misma abreviatura.
-  const mes = MESES_FECHA[m[2].slice(0, 3)];
-  if (mes === undefined) return null;
-  return new Date(Date.UTC(Number(m[3]), mes, Number(m[1]), 12, 0, 0)).toISOString();
+  const dia = Number(m[1]);
+  const mesToken = m[2];
+  // El mes puede venir como nombre ("sep"/"sept") o como numero (formato
+  // dia/mes/anio, igual que el resto de fechas en Colombia) - se recorta a
+  // 3 letras para tolerar "sept" ademas de "sep".
+  const mes = /^\d+$/.test(mesToken) ? Number(mesToken) - 1 : MESES_FECHA[mesToken.slice(0, 3)];
+  if (mes === undefined || mes < 0 || mes > 11) return null;
+  const anio = Number(m[3]);
+  return new Date(Date.UTC(anio, mes, dia, 12, 0, 0)).toISOString();
 }
 
 export function pareceCodigoOrden(s: string): boolean {
