@@ -1728,13 +1728,48 @@
     panel.appendChild(el("div", { class: "section-title", text: "Agentes y accesos" }));
     panel.appendChild(el("div", { class: "section-desc", text: agentes.length + " agentes en tu equipo. Cada uno ve solo sus propios datos al iniciar sesión." }));
 
+    function buildEliminarBtn(a, row) {
+      var msg = el("span", { class: "admin-msg" });
+      var btn = el("button", { class: "btn", text: "Eliminar" });
+      btn.addEventListener("click", function () {
+        if (!confirm("¿Eliminar a " + a.nombre + "? Deja de aparecer en pauta, rankings y ventas nuevas - su historial ya cargado se conserva.")) return;
+        btn.disabled = true;
+        btn.textContent = "Eliminando…";
+        fetch(adminUrl("eliminar-agente"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: "Bearer " + currentAccessToken },
+          body: JSON.stringify({ agenteId: a.id }),
+        })
+          .then(function (res) {
+            return res.json().then(function (body) { return { status: res.status, body: body }; });
+          })
+          .then(function (r) {
+            if (r.status !== 200) {
+              msg.textContent = r.body.error || "No se pudo eliminar";
+              btn.disabled = false;
+              btn.textContent = "Eliminar";
+              return;
+            }
+            row.remove();
+          })
+          .catch(function () {
+            msg.textContent = "Error de red, probá de nuevo.";
+            btn.disabled = false;
+            btn.textContent = "Eliminar";
+          });
+      });
+      return [btn, msg];
+    }
+
     agentes.forEach(function (a) {
       if (a.tieneAcceso) {
-        panel.appendChild(el("div", { class: "admin-row" }, [
+        var rowConAcceso = el("div", { class: "admin-row" }, [
           el("span", { class: "admin-name", text: a.nombre }),
           el("span", { class: "admin-email", text: a.email }),
           el("span", { class: "admin-badge-ok", text: "✓ Con acceso" }),
-        ]));
+        ]);
+        buildEliminarBtn(a, rowConAcceso).forEach(function (el2) { rowConAcceso.appendChild(el2); });
+        panel.appendChild(rowConAcceso);
         return;
       }
       var emailInput = el("input", { type: "email", value: a.emailPersonal || "" });
@@ -1773,12 +1808,14 @@
             btn.textContent = "Crear acceso";
           });
       });
-      panel.appendChild(el("div", { class: "admin-row" }, [
+      var rowSinAcceso = el("div", { class: "admin-row" }, [
         el("span", { class: "admin-name", text: a.nombre }),
         emailInput,
         btn,
         msg,
-      ]));
+      ]);
+      buildEliminarBtn(a, rowSinAcceso).forEach(function (el2) { rowSinAcceso.appendChild(el2); });
+      panel.appendChild(rowSinAcceso);
     });
   }
 

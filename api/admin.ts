@@ -4,7 +4,7 @@ import { getSupabase } from "./_lib/supabase";
 import { tasaDiariaCOP } from "./_lib/agentTier";
 import { getDiasActivosPautaMes } from "./_lib/pautaEstado";
 import { getAccessToken, getEmpresaOverride, requireDirector } from "./_lib/auth";
-import { MESES_TAB, leerVentasDelSheet, sincronizarVentasEmpresa } from "./_lib/ventasSheet";
+import { MESES_TAB, leerVentasDelSheet, sincronizarVentasEmpresa, normalizar } from "./_lib/ventasSheet";
 
 // Los endpoints de /api/admin/* se consolidaron en un solo archivo (con un
 // dispatcher por ?accion=) porque el plan gratuito de Vercel tiene un
@@ -57,6 +57,64 @@ async function handleAgentes(req: VercelRequest, res: VercelResponse) {
   }));
 
   return res.status(200).json({ agentes });
+}
+
+// "Eliminar" un agente: no se borra el registro (se pierde el historial de
+// ventas/comisiones que ya tiene asociado), se desactiva - deja de aparecer
+// para pauta, rankings, login nuevo, etc. Ademas se agrega a
+// agente_bloqueado para que el respaldo por director de ventas-sync no lo
+// vuelva a traer solo la proxima vez que sincronice, tratandolo como si
+// fuera un agente nuevo (esto ya paso una vez con Sergio Gallo).
+async function handleEliminarAgente(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  const supabase = getSupabase();
+  const auth = await requireDirector(supabase, getAccessToken(req), { empresaOverride: getEmpresaOverride(req) });
+  if (!auth.ok) {
+    return res.status(auth.status).json({ error: auth.error });
+  }
+  const { empresaId } = auth.ctx;
+
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const agenteId = Number(body.agenteId);
+  if (!agenteId) {
+    return res.status(400).json({ error: "Falta el agente" });
+  }
+
+  const { data: agente, error: agenteError } = await supabase
+    .from("agentes")
+    .select("id, nombre")
+    .eq("id", agenteId)
+    .eq("empresa_id", empresaId)
+    .maybeSingle();
+  if (agenteError || !agente) {
+    return res.status(404).json({ error: "Agente no encontrado" });
+  }
+
+  const { error: updateError } = await supabase
+    .from("agentes")
+    .update({ activo: false })
+    .eq("id", agenteId)
+    .eq("empresa_id", empresaId);
+  if (updateError) {
+    return res.status(500).json({ error: "Error desactivando el agente: " + updateError.message });
+  }
+
+  const { error: bloqueoError } = await supabase
+    .from("agente_bloqueado")
+    .insert({ empresa_id: empresaId, nombre_normalizado: normalizar(agente.nombre) })
+    .select()
+    .single();
+  // Si ya estaba bloqueado (23505, unique violation) no es un error real -
+  // el objetivo (que quede bloqueado) ya se cumple.
+  if (bloqueoError && (bloqueoError as any).code !== "23505") {
+    return res.status(500).json({
+      error: "El agente se desactivó pero no se pudo bloquear del todo: " + bloqueoError.message,
+    });
+  }
+
+  return res.status(200).json({ ok: true, agente: agente.nombre });
 }
 
 const TIPOS_VALIDOS_AJUSTE = ["lead", "registro", "ftd"] as const;
@@ -722,6 +780,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   switch (accion) {
     case "agentes":
       return handleAgentes(req, res);
+    case "eliminar-agente":
+      return handleEliminarAgente(req, res);
     case "ajuste-manual":
       return handleAjusteManual(req, res);
     case "crear-login-agente":
