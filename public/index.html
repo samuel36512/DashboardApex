@@ -489,6 +489,60 @@
   }
   .hero-stat-grid .hero-stat { padding: 26px 22px; }
 
+  /* ---- Control de rendimiento ---- */
+  .rendimiento-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 18px;
+  }
+  .rendimiento-header select {
+    background: var(--page);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    border-radius: 8px;
+    padding: 8px 30px 8px 10px;
+    font: inherit;
+    font-size: 13px;
+  }
+  .rendimiento-table-wrap { overflow-x: auto; }
+  .rendimiento-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+    min-width: 480px;
+  }
+  .rendimiento-table th, .rendimiento-table td {
+    padding: 12px 14px;
+    text-align: right;
+    white-space: nowrap;
+  }
+  .rendimiento-table th:first-child, .rendimiento-table td:first-child {
+    text-align: left;
+    color: var(--text-secondary);
+    font-size: 12.5px;
+  }
+  .rendimiento-table thead th {
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--series-1);
+    font-weight: 700;
+    border-bottom: 1px solid rgba(220,174,83,0.35);
+    padding-bottom: 10px;
+  }
+  .rendimiento-table thead th:first-child { color: var(--text-muted); }
+  .rendimiento-table tbody tr { border-bottom: 1px solid var(--gridline); }
+  .rendimiento-table tbody tr:last-child { border-bottom: none; }
+  .rendimiento-table tbody tr:nth-child(even) { background: rgba(220,174,83,0.025); }
+  .rendimiento-table .rt-valor { font-size: 15px; font-weight: 600; color: var(--text-primary); }
+  .rendimiento-table .rt-delta { display: block; font-size: 11px; margin-top: 2px; font-weight: 600; }
+  .rendimiento-table .rt-delta.up { color: var(--good); }
+  .rendimiento-table .rt-delta.down { color: var(--danger); }
+  .rendimiento-table .rt-delta.flat { color: var(--text-muted); }
+
   /* ---- Abonos: desglose ventas vs. abonos ---- */
   .split-bar {
     height: 10px;
@@ -2124,10 +2178,148 @@
       }
     }
 
+    var rendimientoContainer = el("div", { id: "rendimiento-container" }, [
+      el("div", { class: "card state" }, [el("div", { class: "big", text: "Cargando control de rendimiento…" })]),
+    ]);
+    content.appendChild(el("section", {}, [rendimientoContainer]));
+
     renderContentState(content);
 
     document.getElementById("updated-label").textContent =
       "Actualizado " + new Date(data.actualizado || Date.now()).toLocaleTimeString("es-419", { hour: "2-digit", minute: "2-digit" });
+    cargarRendimiento(data.rol);
+  }
+
+  var currentRendimientoAgente = "";
+
+  function cargarRendimiento(rol) {
+    var qs = adminUrl("rendimiento") + (currentRendimientoAgente ? "&agente=" + encodeURIComponent(currentRendimientoAgente) : "");
+    fetch(qs, { headers: { Authorization: "Bearer " + currentAccessToken } })
+      .then(function (res) { return res.json().then(function (body) { return { status: res.status, body: body }; }); })
+      .then(function (r) {
+        var container = document.getElementById("rendimiento-container");
+        if (!container) return;
+        container.innerHTML = "";
+        if (r.status !== 200) {
+          container.appendChild(el("div", { class: "card state" }, [
+            el("div", { class: "big", text: "No se pudo cargar el control de rendimiento" }),
+            el("div", { class: "small", text: r.body.error || "" }),
+          ]));
+          return;
+        }
+        renderRendimientoCard(container, rol, r.body);
+      })
+      .catch(function () {
+        var container = document.getElementById("rendimiento-container");
+        if (!container) return;
+        container.innerHTML = "";
+        container.appendChild(el("div", { class: "card state" }, [
+          el("div", { class: "big", text: "Error de red cargando el control de rendimiento" }),
+        ]));
+      });
+  }
+
+  function rtDelta(actual, anterior, esPuntosPorcentuales) {
+    if (anterior === null || anterior === undefined || actual === null || actual === undefined) return null;
+    if (esPuntosPorcentuales) {
+      var puntos = Math.round((actual - anterior) * 10) / 10;
+      if (puntos === 0) return { texto: "sin cambio", clase: "flat" };
+      return { texto: (puntos > 0 ? "▲ +" : "▼ ") + puntos + " pts", clase: puntos > 0 ? "up" : "down" };
+    }
+    if (anterior === 0) {
+      if (actual === 0) return { texto: "sin cambio", clase: "flat" };
+      return { texto: "▲ nuevo", clase: "up" };
+    }
+    var variacion = Math.round(((actual - anterior) / anterior) * 1000) / 10;
+    if (variacion === 0) return { texto: "sin cambio", clase: "flat" };
+    return { texto: (variacion > 0 ? "▲ +" : "▼ ") + variacion + "%", clase: variacion > 0 ? "up" : "down" };
+  }
+
+  function rtCell(valorTexto, delta) {
+    var children = [el("span", { class: "rt-valor", text: valorTexto })];
+    if (delta) children.push(el("span", { class: "rt-delta " + delta.clase, text: delta.texto }));
+    return el("td", {}, children);
+  }
+
+  // Control de rendimiento: leads/registros/FTD/ventas de un agente, mes a
+  // mes, ultimos 3 meses - con flechas de tendencia contra el mes anterior
+  // para ver de un vistazo si viene mejorando o cayendo (pedido explicito:
+  // se noto una caida de conversion mirando el sheet a mano, la idea es que
+  // eso se vea solo en el dashboard).
+  function renderRendimientoCard(container, rol, body) {
+    var card = el("div", { class: "card" });
+    var header = el("div", { class: "rendimiento-header" }, [
+      el("div", {}, [
+        el("div", { class: "section-title", text: "Control de rendimiento" }),
+        el("div", { class: "section-desc", text: "Leads, registros, FTD y ventas de los últimos 3 meses." }),
+      ]),
+    ]);
+
+    if (esRolDirector(rol) && body.agentes && body.agentes.length > 1) {
+      var select = el("select", {});
+      body.agentes.forEach(function (nombre) {
+        select.appendChild(el("option", { value: nombre, text: nombre }));
+      });
+      select.value = body.seleccionado || "";
+      select.addEventListener("change", function () {
+        currentRendimientoAgente = select.value;
+        cargarRendimiento(rol);
+      });
+      header.appendChild(select);
+    } else if (body.seleccionado) {
+      header.appendChild(el("div", { class: "cost-tier", text: body.seleccionado }));
+    }
+    card.appendChild(header);
+
+    if (!body.seleccionado || !body.meses || body.meses.length === 0) {
+      card.appendChild(el("div", { class: "section-desc", text: "Todavía no hay agentes con datos para mostrar." }));
+      container.appendChild(card);
+      return;
+    }
+
+    var meses = body.meses;
+    var wrap = el("div", { class: "rendimiento-table-wrap" });
+    var table = el("table", { class: "rendimiento-table" });
+    var headRow = el("tr", {}, [el("th", { text: "Métrica" })]);
+    meses.forEach(function (m) { headRow.appendChild(el("th", { text: m.mes + " " + m.anio })); });
+    table.appendChild(el("thead", {}, [headRow]));
+
+    var tbody = el("tbody");
+
+    function filaNumerica(etiqueta, campo, formatear) {
+      var tr = el("tr", {}, [el("td", { text: etiqueta })]);
+      meses.forEach(function (m, i) {
+        var anterior = i > 0 ? meses[i - 1][campo] : null;
+        tr.appendChild(rtCell(formatear(m[campo]), i > 0 ? rtDelta(m[campo], anterior, false) : null));
+      });
+      tbody.appendChild(tr);
+    }
+
+    filaNumerica("Leads", "leads", function (v) { return (v || 0).toLocaleString("en-US"); });
+    filaNumerica("Registros", "registros", function (v) { return (v || 0).toLocaleString("en-US"); });
+    filaNumerica("FTD", "ftds", function (v) { return (v || 0).toLocaleString("en-US"); });
+    filaNumerica("Ventas (USD)", "ventasUSD", function (v) { return currencyPrecise.format(v || 0); });
+
+    var filaRF = el("tr", {}, [el("td", { text: "Registro → FTD" })]);
+    meses.forEach(function (m, i) {
+      var anterior = i > 0 ? meses[i - 1].registroToFtdPct : null;
+      var valor = m.registroToFtdPct === null ? "—" : pct(m.registroToFtdPct);
+      filaRF.appendChild(rtCell(valor, i > 0 && m.registroToFtdPct !== null ? rtDelta(m.registroToFtdPct, anterior, true) : null));
+    });
+    tbody.appendChild(filaRF);
+
+    var filaLF = el("tr", {}, [el("td", { text: "Lead → FTD" })]);
+    meses.forEach(function (m, i) {
+      var anterior = i > 0 ? meses[i - 1].leadToFtdPct : null;
+      var valor = m.leadToFtdPct === null ? "—" : pct(m.leadToFtdPct);
+      filaLF.appendChild(rtCell(valor, i > 0 && m.leadToFtdPct !== null ? rtDelta(m.leadToFtdPct, anterior, true) : null));
+    });
+    tbody.appendChild(filaLF);
+
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+    card.appendChild(wrap);
+    container.appendChild(card);
   }
 
   function statTile(label, value, caption) {

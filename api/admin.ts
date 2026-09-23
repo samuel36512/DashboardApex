@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import { getSupabase } from "./_lib/supabase";
 import { tasaDiariaCOP } from "./_lib/agentTier";
 import { getDiasActivosPautaMes } from "./_lib/pautaEstado";
-import { getAccessToken, getEmpresaOverride, requireDirector } from "./_lib/auth";
+import { getAccessToken, getEmpresaOverride, requireAuth, requireDirector } from "./_lib/auth";
 import { MESES_TAB, leerVentasDelSheet, sincronizarVentasEmpresa, normalizar } from "./_lib/ventasSheet";
 
 // Los endpoints de /api/admin/* se consolidaron en un solo archivo (con un
@@ -115,6 +115,110 @@ async function handleEliminarAgente(req: VercelRequest, res: VercelResponse) {
   }
 
   return res.status(200).json({ ok: true, agente: agente.nombre });
+}
+
+interface MesRendimiento {
+  mes: string;
+  anio: number;
+  leads: number;
+  registros: number;
+  ftds: number;
+  ventasUSD: number;
+  registroToFtdPct: number | null;
+  leadToFtdPct: number | null;
+}
+
+// Control de rendimiento: leads/registros/FTD/ventas de un agente puntual,
+// mes a mes, para los ultimos 3 meses (incluido el actual). Director/
+// superadmin puede elegir cualquier agente de su equipo (?agente=Nombre);
+// un agente solo ve lo suyo, sin importar que le manden en el parametro.
+async function handleRendimiento(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "GET") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  const supabase = getSupabase();
+  const auth = await requireAuth(supabase, getAccessToken(req), { empresaOverride: getEmpresaOverride(req) });
+  if (!auth.ok) {
+    return res.status(auth.status).json({ error: auth.error });
+  }
+  const { empresaId, rol, agenteNombre: miNombre } = auth.ctx;
+
+  const { data: agentesRows, error: agentesError } = await supabase
+    .from("agentes")
+    .select("nombre")
+    .eq("activo", true)
+    .eq("empresa_id", empresaId)
+    .order("nombre");
+  if (agentesError) {
+    return res.status(500).json({ error: "Error leyendo agentes" });
+  }
+  const nombresAgentes = (agentesRows ?? []).map((a) => a.nombre as string);
+
+  let agenteSeleccionado: string | null;
+  if (rol === "agente") {
+    agenteSeleccionado = miNombre;
+  } else {
+    const pedido = typeof req.query.agente === "string" ? req.query.agente : "";
+    agenteSeleccionado = pedido && nombresAgentes.includes(pedido) ? pedido : nombresAgentes[0] ?? null;
+  }
+
+  if (!agenteSeleccionado) {
+    res.setHeader("Cache-Control", "no-store");
+    return res.status(200).json({ agentes: nombresAgentes, seleccionado: null, meses: [] });
+  }
+
+  // 3 meses terminando en el mes en curso (hora Colombia, UTC-5), igual
+  // criterio que el resto del dashboard para "el mes en curso".
+  const ahoraCo = new Date(Date.now() - 5 * 60 * 60 * 1000);
+  const mesesInfo: { anio: number; mesIdx: number }[] = [];
+  for (let i = 2; i >= 0; i--) {
+    const d = new Date(Date.UTC(ahoraCo.getUTCFullYear(), ahoraCo.getUTCMonth() - i, 1));
+    mesesInfo.push({ anio: d.getUTCFullYear(), mesIdx: d.getUTCMonth() });
+  }
+  const desdeTotal = new Date(Date.UTC(mesesInfo[0].anio, mesesInfo[0].mesIdx, 1, 5, 0, 0)).toISOString();
+  const hastaTotal = new Date(Date.UTC(mesesInfo[2].anio, mesesInfo[2].mesIdx + 1, 1, 5, 0, 0)).toISOString();
+
+  const acumulados = mesesInfo.map(() => ({ leads: 0, registros: 0, ftds: 0, ventasUSD: 0 }));
+  const PAGE = 1000;
+  for (let offset = 0; ; offset += PAGE) {
+    const { data: page, error } = await supabase
+      .from("eventos")
+      .select("tipo, monto, fecha")
+      .eq("empresa_id", empresaId)
+      .eq("agente", agenteSeleccionado)
+      .gte("fecha", desdeTotal)
+      .lt("fecha", hastaTotal)
+      .range(offset, offset + PAGE - 1);
+    if (error) return res.status(500).json({ error: "Error leyendo actividad: " + error.message });
+    for (const row of page ?? []) {
+      const fecha = new Date(row.fecha as string);
+      const idx = mesesInfo.findIndex((m) => fecha.getUTCFullYear() === m.anio && fecha.getUTCMonth() === m.mesIdx);
+      if (idx === -1) continue;
+      const agg = acumulados[idx];
+      if (row.tipo === "lead") agg.leads++;
+      else if (row.tipo === "registro") agg.registros++;
+      else if (row.tipo === "ftd") agg.ftds++;
+      else if (row.tipo === "venta") agg.ventasUSD += Number(row.monto ?? 0);
+    }
+    if (!page || page.length < PAGE) break;
+  }
+
+  const meses: MesRendimiento[] = mesesInfo.map((m, i) => {
+    const a = acumulados[i];
+    return {
+      mes: MESES_TAB[m.mesIdx],
+      anio: m.anio,
+      leads: a.leads,
+      registros: a.registros,
+      ftds: a.ftds,
+      ventasUSD: Math.round(a.ventasUSD * 100) / 100,
+      registroToFtdPct: a.registros > 0 ? Math.round((a.ftds / a.registros) * 1000) / 10 : null,
+      leadToFtdPct: a.leads > 0 ? Math.round((a.ftds / a.leads) * 1000) / 10 : null,
+    };
+  });
+
+  res.setHeader("Cache-Control", "no-store");
+  return res.status(200).json({ agentes: nombresAgentes, seleccionado: agenteSeleccionado, meses });
 }
 
 const TIPOS_VALIDOS_AJUSTE = ["lead", "registro", "ftd"] as const;
@@ -782,6 +886,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return handleAgentes(req, res);
     case "eliminar-agente":
       return handleEliminarAgente(req, res);
+    case "rendimiento":
+      return handleRendimiento(req, res);
     case "ajuste-manual":
       return handleAjusteManual(req, res);
     case "crear-login-agente":
