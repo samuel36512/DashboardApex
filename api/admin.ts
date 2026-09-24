@@ -224,17 +224,52 @@ async function handleRendimiento(req: VercelRequest, res: VercelResponse) {
 const TIPOS_VALIDOS_AJUSTE = ["lead", "registro", "ftd"] as const;
 const VALOR_MAXIMO_AJUSTE = 5000;
 
-// Limites del mes en curso, hora Colombia (UTC-5) - el "numero que se ve" es
-// siempre el total DE ESTE MES, igual criterio que el resto del dashboard
-// (Datos actuales, costo por lead, etc.).
-function limitesMesActualColombia(): { desde: string; hasta: string } {
+function mesColombiaActual(): { anio: number; mes: number } {
   const ahoraCo = new Date(Date.now() - 5 * 60 * 60 * 1000);
-  const anio = ahoraCo.getUTCFullYear();
-  const mes = ahoraCo.getUTCMonth();
+  return { anio: ahoraCo.getUTCFullYear(), mes: ahoraCo.getUTCMonth() };
+}
+
+// Limites de un mes, hora Colombia (UTC-5). mesParam es "YYYY-MM" opcional -
+// sin el, usa el mes en curso, igual criterio que el resto del dashboard
+// (Datos actuales, costo por lead, etc.).
+function limitesMes(mesParam?: string): { desde: string; hasta: string; anio: number; mes: number } {
+  let anio: number;
+  let mes: number;
+  if (mesParam && /^\d{4}-\d{2}$/.test(mesParam)) {
+    anio = Number(mesParam.slice(0, 4));
+    mes = Number(mesParam.slice(5, 7)) - 1;
+  } else {
+    ({ anio, mes } = mesColombiaActual());
+  }
   return {
+    anio,
+    mes,
     desde: new Date(Date.UTC(anio, mes, 1, 5, 0, 0)).toISOString(),
     hasta: new Date(Date.UTC(anio, mes + 1, 1, 5, 0, 0)).toISOString(),
   };
+}
+
+function diasEnMes(anio: number, mes: number): number {
+  return new Date(Date.UTC(anio, mes + 1, 0)).getUTCDate();
+}
+
+// Fecha para las filas "ajuste-*" nuevas: si el director eligio un dia
+// especifico, se usa ese (recortado a los dias reales del mes). Si no, se usa
+// "ahora" cuando el mes elegido es el mes en curso, o el mismo dia-del-mes de
+// hoy pero en el mes elegido cuando es un mes pasado.
+function fechaParaAjuste(anio: number, mes: number, diaParam?: number): string {
+  const maxDia = diasEnMes(anio, mes);
+  if (diaParam !== undefined && Number.isFinite(diaParam)) {
+    const dia = Math.min(Math.max(Math.trunc(diaParam), 1), maxDia);
+    return new Date(Date.UTC(anio, mes, dia, 12, 0, 0)).toISOString();
+  }
+  const { anio: anioActual, mes: mesActual } = mesColombiaActual();
+  if (anio === anioActual && mes === mesActual) {
+    return new Date().toISOString();
+  }
+  const ahoraCo = new Date(Date.now() - 5 * 60 * 60 * 1000);
+  const dia = Math.min(ahoraCo.getUTCDate(), maxDia);
+  return new Date(Date.UTC(anio, mes, dia, 12, 0, 0)).toISOString();
 }
 
 // Ajuste manual: el director pone el numero total que quiere ver ESTE MES
@@ -269,7 +304,8 @@ async function handleAjusteManual(req: VercelRequest, res: VercelResponse) {
     if (agenteQError || !agenteQ) {
       return res.status(400).json({ error: "Agente no encontrado" });
     }
-    const { desde: desdeQ, hasta: hastaQ } = limitesMesActualColombia();
+    const mesQ = typeof req.query.mes === "string" ? req.query.mes : undefined;
+    const { desde: desdeQ, hasta: hastaQ } = limitesMes(mesQ);
     const { count: realQ, error: realQError } = await supabase
       .from("eventos")
       .select("id", { count: "exact", head: true })
@@ -302,6 +338,8 @@ async function handleAjusteManual(req: VercelRequest, res: VercelResponse) {
   const agenteId = Number(body.agenteId);
   const tipo = typeof body.tipo === "string" ? body.tipo : "";
   const valorDeseado = Math.trunc(Number(body.valorDeseado));
+  const mesBody = typeof body.mes === "string" ? body.mes : undefined;
+  const diaBody = body.dia !== undefined && body.dia !== null && body.dia !== "" ? Number(body.dia) : undefined;
 
   if (!agenteId) {
     return res.status(400).json({ error: "Falta el agente" });
@@ -311,6 +349,9 @@ async function handleAjusteManual(req: VercelRequest, res: VercelResponse) {
   }
   if (!Number.isFinite(valorDeseado) || valorDeseado < 0 || valorDeseado > VALOR_MAXIMO_AJUSTE) {
     return res.status(400).json({ error: `El número debe ser entre 0 y ${VALOR_MAXIMO_AJUSTE}` });
+  }
+  if (diaBody !== undefined && (!Number.isFinite(diaBody) || diaBody < 1 || diaBody > 31)) {
+    return res.status(400).json({ error: "El día debe ser entre 1 y 31" });
   }
 
   const { data: agente, error: agenteError } = await supabase
@@ -324,7 +365,7 @@ async function handleAjusteManual(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: "Agente no encontrado" });
   }
 
-  const { desde, hasta } = limitesMesActualColombia();
+  const { desde, hasta, anio, mes } = limitesMes(mesBody);
 
   const { count: realCount, error: realError } = await supabase
     .from("eventos")
@@ -336,13 +377,13 @@ async function handleAjusteManual(req: VercelRequest, res: VercelResponse) {
     .lt("fecha", hasta)
     .not("contacto_id", "like", "ajuste-%");
   if (realError) {
-    return res.status(500).json({ error: "Error leyendo lo real de este mes: " + realError.message });
+    return res.status(500).json({ error: "Error leyendo lo real de ese mes: " + realError.message });
   }
   const real = realCount ?? 0;
 
   if (valorDeseado < real) {
     return res.status(400).json({
-      error: `No se puede bajar de ${real} - ya hay ${real} ${tipo}(s) reales sincronizados este mes. Como mucho podés poner ${real}.`,
+      error: `No se puede bajar de ${real} - ya hay ${real} ${tipo}(s) reales sincronizados ese mes. Como mucho podés poner ${real}.`,
     });
   }
 
@@ -370,11 +411,12 @@ async function handleAjusteManual(req: VercelRequest, res: VercelResponse) {
     }
   } else if (necesarios > ajustesIds.length) {
     const nuevos = necesarios - ajustesIds.length;
+    const fechaAjuste = fechaParaAjuste(anio, mes, diaBody);
     const filas = Array.from({ length: nuevos }, () => ({
       contacto_id: `ajuste-${crypto.randomUUID()}`,
       agente: agente.nombre,
       tipo,
-      fecha: new Date().toISOString(),
+      fecha: fechaAjuste,
       empresa_id: empresaId,
     }));
     const { error: insertError } = await supabase.from("eventos").upsert(filas, { onConflict: "empresa_id,contacto_id,tipo" });

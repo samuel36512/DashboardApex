@@ -1982,7 +1982,7 @@
     panel.appendChild(el("div", { class: "section-title", text: "Ajuste manual" }));
     panel.appendChild(el("div", {
       class: "section-desc",
-      text: "Poné el número que querés que se vea este mes para ese agente - no suma ni resta, reemplaza el total directamente.",
+      text: "Poné el número que querés que se vea ese mes para ese agente - no suma ni resta, reemplaza el total directamente.",
     }));
 
     var agenteSelect = el("select", { class: "range-input" });
@@ -1996,8 +1996,14 @@
       el("option", { value: "ftd", text: "FTD" }),
     ]);
 
+    var mesSelect = el("select", { class: "range-input" });
+    opcionesMesesGlobal().forEach(function (o) {
+      mesSelect.appendChild(el("option", { value: o.value, text: o.label }));
+    });
+
     var valorActualTexto = el("div", { class: "valor-actual" }, [el("span", { text: "Cargando valor actual…" })]);
     var valorInput = el("input", { type: "number", class: "range-input", min: "0" });
+    var diaInput = el("input", { type: "number", class: "range-input", min: "1", max: "31", placeholder: "Día (opcional)" });
     var msg = el("span", { class: "admin-msg" });
     var btn = el("button", { class: "btn", text: "Guardar" });
 
@@ -2005,7 +2011,9 @@
       if (!agenteSelect.value) return;
       valorActualTexto.innerHTML = "";
       valorActualTexto.appendChild(el("span", { text: "Cargando valor actual…" }));
-      fetch(adminUrl("ajuste-manual") + "&agenteId=" + encodeURIComponent(agenteSelect.value) + "&tipo=" + encodeURIComponent(tipoSelect.value), {
+      var qs = "&agenteId=" + encodeURIComponent(agenteSelect.value) + "&tipo=" + encodeURIComponent(tipoSelect.value);
+      if (mesSelect.value) qs += "&mes=" + encodeURIComponent(mesSelect.value);
+      fetch(adminUrl("ajuste-manual") + qs, {
         headers: { Authorization: "Bearer " + currentAccessToken },
       })
         .then(function (res) {
@@ -2017,7 +2025,7 @@
             valorActualTexto.appendChild(el("span", { text: r.body.error || "No se pudo leer el valor actual" }));
             return;
           }
-          valorActualTexto.appendChild(el("span", { text: "Valor actual este mes: " }));
+          valorActualTexto.appendChild(el("span", { text: "Valor actual ese mes: " }));
           valorActualTexto.appendChild(el("b", { text: String(r.body.total) }));
           valorInput.value = String(r.body.total);
         })
@@ -2029,15 +2037,21 @@
 
     agenteSelect.addEventListener("change", cargarValorActual);
     tipoSelect.addEventListener("change", cargarValorActual);
+    mesSelect.addEventListener("change", cargarValorActual);
 
     btn.addEventListener("click", function () {
       var valorDeseado = parseInt(valorInput.value, 10);
+      var dia = diaInput.value ? parseInt(diaInput.value, 10) : null;
       if (!agenteSelect.value) {
         msg.textContent = "Elegí un agente";
         return;
       }
       if (!Number.isFinite(valorDeseado) || valorDeseado < 0) {
         msg.textContent = "El número tiene que ser 0 o más";
+        return;
+      }
+      if (dia !== null && (!Number.isFinite(dia) || dia < 1 || dia > 31)) {
+        msg.textContent = "El día tiene que ser entre 1 y 31";
         return;
       }
       btn.disabled = true;
@@ -2049,6 +2063,8 @@
           agenteId: Number(agenteSelect.value),
           tipo: tipoSelect.value,
           valorDeseado: valorDeseado,
+          mes: mesSelect.value || undefined,
+          dia: dia || undefined,
         }),
       })
         .then(function (res) {
@@ -2061,7 +2077,7 @@
             msg.textContent = r.body.error || "No se pudo guardar";
             return;
           }
-          msg.textContent = "Listo: " + r.body.tipo + " de " + r.body.agente + " queda en " + r.body.totalFinal + " este mes.";
+          msg.textContent = "Listo: " + r.body.tipo + " de " + r.body.agente + " queda en " + r.body.totalFinal + " ese mes.";
           cargarValorActual();
           loadMetrics(true, currentAccessToken);
         })
@@ -2072,12 +2088,12 @@
         });
     });
 
-    panel.appendChild(el("div", { class: "admin-row" }, [agenteSelect, tipoSelect]));
+    panel.appendChild(el("div", { class: "admin-row" }, [agenteSelect, tipoSelect, mesSelect]));
     panel.appendChild(valorActualTexto);
-    panel.appendChild(el("div", { class: "admin-row" }, [valorInput, btn, msg]));
+    panel.appendChild(el("div", { class: "admin-row" }, [valorInput, diaInput, btn, msg]));
     panel.appendChild(el("div", {
       class: "section-desc",
-      text: "El número es siempre del mes en curso. No se puede poner un valor menor al que ya hay sincronizado realmente ese mes.",
+      text: "El día es opcional (por si querés fechar el ajuste en un día puntual del mes elegido). No se puede poner un valor menor al que ya hay sincronizado realmente ese mes.",
     }));
 
     cargarValorActual();
