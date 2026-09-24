@@ -1982,7 +1982,7 @@
     panel.appendChild(el("div", { class: "section-title", text: "Ajuste manual" }));
     panel.appendChild(el("div", {
       class: "section-desc",
-      text: "Para cuando GHL falla y un lead, registro o FTD real no quedó sincronizado: lo agregás acá a mano.",
+      text: "Poné el número que querés que se vea este mes para ese agente - no suma ni resta, reemplaza el total directamente.",
     }));
 
     var agenteSelect = el("select", { class: "range-input" });
@@ -1996,44 +1996,59 @@
       el("option", { value: "ftd", text: "FTD" }),
     ]);
 
-    var modoSelect = el("select", { class: "range-input" }, [
-      el("option", { value: "sumar", text: "Sumar" }),
-      el("option", { value: "restar", text: "Restar" }),
-    ]);
-
-    var cantidadInput = el("input", { type: "number", class: "range-input", value: "1", min: "1", max: "200" });
-    var fechaInput = el("input", { type: "date", class: "range-input" });
+    var valorActualTexto = el("div", { class: "valor-actual" }, [el("span", { text: "Cargando valor actual…" })]);
+    var valorInput = el("input", { type: "number", class: "range-input", min: "0" });
     var msg = el("span", { class: "admin-msg" });
-    var btn = el("button", { class: "btn", text: "Agregar ajuste" });
+    var btn = el("button", { class: "btn", text: "Guardar" });
 
-    modoSelect.addEventListener("change", function () {
-      var esRestar = modoSelect.value === "restar";
-      btn.textContent = esRestar ? "Restar ajuste" : "Agregar ajuste";
-      fechaInput.style.display = esRestar ? "none" : "";
-    });
+    function cargarValorActual() {
+      if (!agenteSelect.value) return;
+      valorActualTexto.innerHTML = "";
+      valorActualTexto.appendChild(el("span", { text: "Cargando valor actual…" }));
+      fetch(adminUrl("ajuste-manual") + "&agenteId=" + encodeURIComponent(agenteSelect.value) + "&tipo=" + encodeURIComponent(tipoSelect.value), {
+        headers: { Authorization: "Bearer " + currentAccessToken },
+      })
+        .then(function (res) {
+          return res.json().then(function (body) { return { status: res.status, body: body }; });
+        })
+        .then(function (r) {
+          valorActualTexto.innerHTML = "";
+          if (r.status !== 200) {
+            valorActualTexto.appendChild(el("span", { text: r.body.error || "No se pudo leer el valor actual" }));
+            return;
+          }
+          valorActualTexto.appendChild(el("span", { text: "Valor actual este mes: " }));
+          valorActualTexto.appendChild(el("b", { text: String(r.body.total) }));
+          valorInput.value = String(r.body.total);
+        })
+        .catch(function () {
+          valorActualTexto.innerHTML = "";
+          valorActualTexto.appendChild(el("span", { text: "Error de red." }));
+        });
+    }
+
+    agenteSelect.addEventListener("change", cargarValorActual);
+    tipoSelect.addEventListener("change", cargarValorActual);
 
     btn.addEventListener("click", function () {
-      var cantidad = parseInt(cantidadInput.value, 10);
-      var modo = modoSelect.value;
+      var valorDeseado = parseInt(valorInput.value, 10);
       if (!agenteSelect.value) {
         msg.textContent = "Elegí un agente";
         return;
       }
-      if (!cantidad || cantidad < 1) {
-        msg.textContent = "La cantidad tiene que ser al menos 1";
+      if (!Number.isFinite(valorDeseado) || valorDeseado < 0) {
+        msg.textContent = "El número tiene que ser 0 o más";
         return;
       }
       btn.disabled = true;
-      btn.textContent = modo === "restar" ? "Restando…" : "Agregando…";
+      btn.textContent = "Guardando…";
       fetch(adminUrl("ajuste-manual"), {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: "Bearer " + currentAccessToken },
         body: JSON.stringify({
           agenteId: Number(agenteSelect.value),
           tipo: tipoSelect.value,
-          modo: modo,
-          cantidad: cantidad,
-          fecha: fechaInput.value || undefined,
+          valorDeseado: valorDeseado,
         }),
       })
         .then(function (res) {
@@ -2041,36 +2056,31 @@
         })
         .then(function (r) {
           btn.disabled = false;
-          btn.textContent = modo === "restar" ? "Restar ajuste" : "Agregar ajuste";
-          if (r.status !== 201 && r.status !== 200) {
-            msg.textContent = r.body.error || "No se pudo aplicar el ajuste";
+          btn.textContent = "Guardar";
+          if (r.status !== 200) {
+            msg.textContent = r.body.error || "No se pudo guardar";
             return;
           }
-          if (modo === "restar") {
-            msg.textContent = "Listo: se restaron " + r.body.cantidadRestada + " " + r.body.tipo + "(s) de " + r.body.agente +
-              (r.body.incompleto ? " (no había más ajustes manuales de ese tipo para restar)." : ".");
-          } else {
-            msg.textContent = "Listo: " + r.body.cantidad + " " + r.body.tipo + "(s) agregados a " + r.body.agente + ".";
-          }
+          msg.textContent = "Listo: " + r.body.tipo + " de " + r.body.agente + " queda en " + r.body.totalFinal + " este mes.";
+          cargarValorActual();
           loadMetrics(true, currentAccessToken);
         })
         .catch(function () {
           btn.disabled = false;
-          btn.textContent = modo === "restar" ? "Restar ajuste" : "Agregar ajuste";
+          btn.textContent = "Guardar";
           msg.textContent = "Error de red, probá de nuevo.";
         });
     });
 
-    panel.appendChild(el("div", { class: "admin-row" }, [
-      agenteSelect,
-      tipoSelect,
-      modoSelect,
-      cantidadInput,
-      fechaInput,
-      btn,
-      msg,
-    ]));
-    panel.appendChild(el("div", { class: "section-desc", text: "Restar solo quita ajustes agregados a mano con este mismo botón, nunca actividad real sincronizada de GHL. Si dejás la fecha vacía al sumar, se usa el momento actual." }));
+    panel.appendChild(el("div", { class: "admin-row" }, [agenteSelect, tipoSelect]));
+    panel.appendChild(valorActualTexto);
+    panel.appendChild(el("div", { class: "admin-row" }, [valorInput, btn, msg]));
+    panel.appendChild(el("div", {
+      class: "section-desc",
+      text: "El número es siempre del mes en curso. No se puede poner un valor menor al que ya hay sincronizado realmente ese mes.",
+    }));
+
+    cargarValorActual();
   }
 
   function renderContentState(node) {

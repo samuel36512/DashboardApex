@@ -222,23 +222,29 @@ async function handleRendimiento(req: VercelRequest, res: VercelResponse) {
 }
 
 const TIPOS_VALIDOS_AJUSTE = ["lead", "registro", "ftd"] as const;
-const MODOS_VALIDOS_AJUSTE = ["sumar", "restar"] as const;
-const CANTIDAD_MAXIMA_AJUSTE = 200;
+const VALOR_MAXIMO_AJUSTE = 5000;
 
-// Fecha en Colombia (UTC-5): si el director elige un dia puntual se usa la
-// medianoche de ese dia en Colombia (mismo criterio que el historico
-// sembrado a mano), y si no elige nada se usa el instante actual.
-function fechaColombia(fechaStr: string): string | null {
-  const m = fechaStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!m) return null;
-  const [, anio, mes, dia] = m;
-  return new Date(Date.UTC(Number(anio), Number(mes) - 1, Number(dia), 5, 0, 0)).toISOString();
+// Limites del mes en curso, hora Colombia (UTC-5) - el "numero que se ve" es
+// siempre el total DE ESTE MES, igual criterio que el resto del dashboard
+// (Datos actuales, costo por lead, etc.).
+function limitesMesActualColombia(): { desde: string; hasta: string } {
+  const ahoraCo = new Date(Date.now() - 5 * 60 * 60 * 1000);
+  const anio = ahoraCo.getUTCFullYear();
+  const mes = ahoraCo.getUTCMonth();
+  return {
+    desde: new Date(Date.UTC(anio, mes, 1, 5, 0, 0)).toISOString(),
+    hasta: new Date(Date.UTC(anio, mes + 1, 1, 5, 0, 0)).toISOString(),
+  };
 }
 
+// Ajuste manual: el director pone el numero total que quiere ver ESTE MES
+// para un agente (leads/registros/FTD), no suma ni resta de a poco - el
+// sistema calcula cuanto hay REAL (sincronizado, sin contar ajustes viejos)
+// y ajusta la diferencia agregando o quitando filas "ajuste-*" hasta que el
+// total de vuelva a dar exacto. Nunca toca actividad real sincronizada -
+// si el numero pedido es menor a lo real, no se puede bajar mas (se avisa
+// en vez de borrar datos reales).
 async function handleAjusteManual(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
   const supabase = getSupabase();
   const auth = await requireDirector(supabase, getAccessToken(req), { empresaOverride: getEmpresaOverride(req) });
   if (!auth.ok) {
@@ -246,12 +252,56 @@ async function handleAjusteManual(req: VercelRequest, res: VercelResponse) {
   }
   const { empresaId } = auth.ctx;
 
+  if (req.method === "GET") {
+    // Para precargar "valor actual" en el panel, igual que Abonos.
+    const agenteIdQ = Number(req.query.agenteId);
+    const tipoQ = typeof req.query.tipo === "string" ? req.query.tipo : "";
+    if (!agenteIdQ || !TIPOS_VALIDOS_AJUSTE.includes(tipoQ as (typeof TIPOS_VALIDOS_AJUSTE)[number])) {
+      return res.status(400).json({ error: "Falta agenteId o tipo válido" });
+    }
+    const { data: agenteQ, error: agenteQError } = await supabase
+      .from("agentes")
+      .select("id, nombre")
+      .eq("id", agenteIdQ)
+      .eq("activo", true)
+      .eq("empresa_id", empresaId)
+      .maybeSingle();
+    if (agenteQError || !agenteQ) {
+      return res.status(400).json({ error: "Agente no encontrado" });
+    }
+    const { desde: desdeQ, hasta: hastaQ } = limitesMesActualColombia();
+    const { count: realQ, error: realQError } = await supabase
+      .from("eventos")
+      .select("id", { count: "exact", head: true })
+      .eq("agente", agenteQ.nombre)
+      .eq("tipo", tipoQ)
+      .eq("empresa_id", empresaId)
+      .gte("fecha", desdeQ)
+      .lt("fecha", hastaQ)
+      .not("contacto_id", "like", "ajuste-%");
+    const { count: totalQ, error: totalQError } = await supabase
+      .from("eventos")
+      .select("id", { count: "exact", head: true })
+      .eq("agente", agenteQ.nombre)
+      .eq("tipo", tipoQ)
+      .eq("empresa_id", empresaId)
+      .gte("fecha", desdeQ)
+      .lt("fecha", hastaQ);
+    if (realQError || totalQError) {
+      return res.status(500).json({ error: "Error leyendo el valor actual" });
+    }
+    res.setHeader("Cache-Control", "no-store");
+    return res.status(200).json({ real: realQ ?? 0, total: totalQ ?? 0 });
+  }
+
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
   const body = (req.body ?? {}) as Record<string, unknown>;
   const agenteId = Number(body.agenteId);
   const tipo = typeof body.tipo === "string" ? body.tipo : "";
-  const modo = typeof body.modo === "string" && body.modo ? body.modo : "sumar";
-  const cantidad = Math.trunc(Number(body.cantidad));
-  const fechaInput = typeof body.fecha === "string" ? body.fecha.trim() : "";
+  const valorDeseado = Math.trunc(Number(body.valorDeseado));
 
   if (!agenteId) {
     return res.status(400).json({ error: "Falta el agente" });
@@ -259,22 +309,8 @@ async function handleAjusteManual(req: VercelRequest, res: VercelResponse) {
   if (!TIPOS_VALIDOS_AJUSTE.includes(tipo as (typeof TIPOS_VALIDOS_AJUSTE)[number])) {
     return res.status(400).json({ error: "Tipo invalido - debe ser lead, registro o ftd" });
   }
-  if (!MODOS_VALIDOS_AJUSTE.includes(modo as (typeof MODOS_VALIDOS_AJUSTE)[number])) {
-    return res.status(400).json({ error: "Modo invalido - debe ser sumar o restar" });
-  }
-  if (!Number.isFinite(cantidad) || cantidad < 1 || cantidad > CANTIDAD_MAXIMA_AJUSTE) {
-    return res.status(400).json({ error: `La cantidad debe ser un numero entre 1 y ${CANTIDAD_MAXIMA_AJUSTE}` });
-  }
-
-  let fecha: string;
-  if (fechaInput) {
-    const fechaResuelta = fechaColombia(fechaInput);
-    if (!fechaResuelta) {
-      return res.status(400).json({ error: "Fecha invalida - usa el formato AAAA-MM-DD" });
-    }
-    fecha = fechaResuelta;
-  } else {
-    fecha = new Date().toISOString();
+  if (!Number.isFinite(valorDeseado) || valorDeseado < 0 || valorDeseado > VALOR_MAXIMO_AJUSTE) {
+    return res.status(400).json({ error: `El número debe ser entre 0 y ${VALOR_MAXIMO_AJUSTE}` });
   }
 
   const { data: agente, error: agenteError } = await supabase
@@ -288,61 +324,66 @@ async function handleAjusteManual(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: "Agente no encontrado" });
   }
 
-  if (modo === "restar") {
-    // Solo se puede restar de lo que se sumo con este mismo boton (prefijo
-    // "ajuste-") - nunca de actividad real sincronizada desde GHL, para no
-    // arriesgar borrar historial real por error. Se quitan las mas
-    // recientes primero (lo mas probable que sea el ajuste equivocado).
-    const { data: candidatos, error: candidatosError } = await supabase
-      .from("eventos")
-      .select("id")
-      .eq("agente", agente.nombre)
-      .eq("tipo", tipo)
-      .eq("empresa_id", empresaId)
-      .like("contacto_id", "ajuste-%")
-      .order("creado_en", { ascending: false })
-      .limit(cantidad);
-    if (candidatosError) {
-      return res.status(500).json({ error: "Error buscando ajustes para restar: " + candidatosError.message });
-    }
-    const ids = (candidatos ?? []).map((c) => c.id);
-    if (ids.length === 0) {
-      return res.status(400).json({
-        error: `No hay ajustes manuales de ${tipo} para ${agente.nombre} que se puedan restar`,
-      });
-    }
-    const { error: deleteError } = await supabase.from("eventos").delete().in("id", ids);
-    if (deleteError) {
-      return res.status(500).json({ error: "Error restando el ajuste: " + deleteError.message });
-    }
-    return res.status(200).json({
-      ok: true,
-      agente: agente.nombre,
-      tipo,
-      modo,
-      cantidadPedida: cantidad,
-      cantidadRestada: ids.length,
-      incompleto: ids.length < cantidad,
+  const { desde, hasta } = limitesMesActualColombia();
+
+  const { count: realCount, error: realError } = await supabase
+    .from("eventos")
+    .select("id", { count: "exact", head: true })
+    .eq("agente", agente.nombre)
+    .eq("tipo", tipo)
+    .eq("empresa_id", empresaId)
+    .gte("fecha", desde)
+    .lt("fecha", hasta)
+    .not("contacto_id", "like", "ajuste-%");
+  if (realError) {
+    return res.status(500).json({ error: "Error leyendo lo real de este mes: " + realError.message });
+  }
+  const real = realCount ?? 0;
+
+  if (valorDeseado < real) {
+    return res.status(400).json({
+      error: `No se puede bajar de ${real} - ya hay ${real} ${tipo}(s) reales sincronizados este mes. Como mucho podés poner ${real}.`,
     });
   }
 
-  // contacto_id con prefijo "ajuste-" para poder distinguir estos registros
-  // de los que llegan realmente sincronizados desde GHL, en caso de que
-  // despues haga falta auditar o revertir un ajuste puntual.
-  const filas = Array.from({ length: cantidad }, () => ({
-    contacto_id: `ajuste-${crypto.randomUUID()}`,
-    agente: agente.nombre,
-    tipo,
-    fecha,
-    empresa_id: empresaId,
-  }));
+  const { data: ajustesActuales, error: ajustesError } = await supabase
+    .from("eventos")
+    .select("id")
+    .eq("agente", agente.nombre)
+    .eq("tipo", tipo)
+    .eq("empresa_id", empresaId)
+    .gte("fecha", desde)
+    .lt("fecha", hasta)
+    .like("contacto_id", "ajuste-%")
+    .order("creado_en", { ascending: false });
+  if (ajustesError) {
+    return res.status(500).json({ error: "Error leyendo ajustes existentes: " + ajustesError.message });
+  }
+  const ajustesIds = (ajustesActuales ?? []).map((r) => r.id);
+  const necesarios = valorDeseado - real;
 
-  const { error: insertError } = await supabase.from("eventos").upsert(filas, { onConflict: "empresa_id,contacto_id,tipo" });
-  if (insertError) {
-    return res.status(500).json({ error: "Error guardando el ajuste: " + insertError.message });
+  if (necesarios < ajustesIds.length) {
+    const idsABorrar = ajustesIds.slice(0, ajustesIds.length - necesarios);
+    const { error: deleteError } = await supabase.from("eventos").delete().in("id", idsABorrar);
+    if (deleteError) {
+      return res.status(500).json({ error: "Error ajustando hacia abajo: " + deleteError.message });
+    }
+  } else if (necesarios > ajustesIds.length) {
+    const nuevos = necesarios - ajustesIds.length;
+    const filas = Array.from({ length: nuevos }, () => ({
+      contacto_id: `ajuste-${crypto.randomUUID()}`,
+      agente: agente.nombre,
+      tipo,
+      fecha: new Date().toISOString(),
+      empresa_id: empresaId,
+    }));
+    const { error: insertError } = await supabase.from("eventos").upsert(filas, { onConflict: "empresa_id,contacto_id,tipo" });
+    if (insertError) {
+      return res.status(500).json({ error: "Error ajustando hacia arriba: " + insertError.message });
+    }
   }
 
-  return res.status(201).json({ ok: true, agente: agente.nombre, tipo, modo, cantidad, fecha });
+  return res.status(200).json({ ok: true, agente: agente.nombre, tipo, valorDeseado, real, totalFinal: real + necesarios });
 }
 
 function randomPassword(): string {
