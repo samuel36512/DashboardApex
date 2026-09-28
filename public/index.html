@@ -2180,7 +2180,12 @@
       ]),
     ]));
     var tbody = el("tbody");
-    agentes.forEach(function (a) {
+    var agentesPorConversion = agentes.slice().sort(function (a, b) {
+      var ca = (a.conversion && a.conversion.leadToFtd) || 0;
+      var cb = (b.conversion && b.conversion.leadToFtd) || 0;
+      return cb - ca;
+    });
+    agentesPorConversion.forEach(function (a) {
       var c = a.conversion || {};
       tbody.appendChild(el("tr", {}, [
         el("td", { text: a.agente }),
