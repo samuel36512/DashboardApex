@@ -2788,6 +2788,7 @@
       fetch(adminUrl("sincronizar-ventas"), {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: "Bearer " + currentAccessToken },
+        body: JSON.stringify({ mes: currentVentasEquipoMes || undefined }),
       })
         .then(function (res) {
           return res.json().then(function (body) { return { status: res.status, body: body }; });

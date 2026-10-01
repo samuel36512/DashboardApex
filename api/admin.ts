@@ -735,10 +735,21 @@ async function handleSincronizarVentas(req: VercelRequest, res: VercelResponse) 
     return res.status(500).json({ error: "Falta GOOGLE_SERVICE_ACCOUNT_JSON en Vercel" });
   }
 
+  // Por default sincroniza el mes en curso (como siempre), pero admite un
+  // "mes" opcional ("YYYY-MM", igual convencion que Conciliar/Ajuste manual)
+  // para poder cerrar el mes anterior cuando la pestaña del mes nuevo todavia
+  // no existe en el sheet compartido.
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const mesBody = typeof body.mes === "string" ? body.mes.trim() : "";
+  const mesMatch = /^(\d{4})-(\d{2})$/.exec(mesBody);
+  const mesIdxOverride = mesMatch ? Number(mesMatch[2]) - 1 : null;
+  if (mesBody && (mesIdxOverride === null || mesIdxOverride < 0 || mesIdxOverride > 11)) {
+    return res.status(400).json({ error: "Mes invalido - usá el formato YYYY-MM" });
+  }
+  const mesOverride = mesIdxOverride !== null ? MESES_TAB[mesIdxOverride] : undefined;
+
   try {
-    // Siempre el mes en curso - el boton es para traer lo mas reciente, no
-    // para reprocesar meses pasados (eso se hace con ?mes= en la URL del cron).
-    const resultado = await sincronizarVentasEmpresa(supabase, empresaId, sheetId, ventasDirectorEmails, credsJson);
+    const resultado = await sincronizarVentasEmpresa(supabase, empresaId, sheetId, ventasDirectorEmails, credsJson, mesOverride);
     res.setHeader("Cache-Control", "no-store");
     return res.status(200).json(resultado);
   } catch (err: any) {
